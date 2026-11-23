@@ -2,7 +2,7 @@
 //! syscall path.
 
 use heft_scan::tree::flag;
-use heft_scan::{report, NodeId, Options, Scan, Tree};
+use heft_scan::{NodeId, Options, Scan, Tree, report};
 use std::fs;
 use std::path::Path;
 
@@ -18,7 +18,13 @@ fn find(t: &Tree, parent: NodeId, name: &str) -> NodeId {
 }
 
 fn scan(root: &Path) -> Scan {
-    Scan::run_blocking(vec![root.to_path_buf()], Options { threads: 4, ..Default::default() })
+    Scan::run_blocking(
+        vec![root.to_path_buf()],
+        Options {
+            threads: 4,
+            ..Default::default()
+        },
+    )
 }
 
 #[test]
@@ -161,8 +167,10 @@ fn an_unreadable_folder_is_reported_not_dropped() {
 
 #[cfg(target_os = "linux")]
 fn rustix_is_root() -> bool {
-    std::fs::metadata("/proc/self").map(|m| {
-        use std::os::unix::fs::MetadataExt;
-        m.uid() == 0
-    }).unwrap_or(false)
+    std::fs::metadata("/proc/self")
+        .map(|m| {
+            use std::os::unix::fs::MetadataExt;
+            m.uid() == 0
+        })
+        .unwrap_or(false)
 }

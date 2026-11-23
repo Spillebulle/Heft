@@ -2,13 +2,15 @@
 //!
 //! Returns `None` when the arguments ask for the window.
 
-use heft_scan::units::{format_count, format_duration, format_size, Units};
-use heft_scan::{report, tree::flag, NodeId, Options, Scan, Tree};
+use heft_scan::units::{Units, format_count, format_duration, format_size};
+use heft_scan::{NodeId, Options, Scan, Tree, report, tree::flag};
 use std::path::PathBuf;
 
 const USAGE: &str = "\
 Usage:
   heft                          open the window
+  heft <path>... [--view <v>]   open the window scanning these (v: folders,
+                                treemap, types, largest, age)
   heft scan <path>... [options] scan and print the largest folders
   heft bench <path>...          scan and print timings and memory
   heft --version
@@ -99,6 +101,7 @@ pub fn run(args: &[String]) -> Option<i32> {
                 2
             }
         },
+        other if other == "--view" || std::path::Path::new(other).exists() => return None,
         other => {
             eprintln!("Unknown command {other}.\n\n{USAGE}");
             2
@@ -108,7 +111,11 @@ pub fn run(args: &[String]) -> Option<i32> {
 }
 
 fn options(a: &Args) -> Options {
-    Options { cross_filesystems: a.cross, threads: a.threads, mtime: true }
+    Options {
+        cross_filesystems: a.cross,
+        threads: a.threads,
+        mtime: true,
+    }
 }
 
 fn scan(a: &Args) -> i32 {
@@ -130,7 +137,11 @@ fn scan(a: &Args) -> i32 {
         if a.files > 0 {
             println!("\n  Largest files:");
             for f in report::largest_files(&t, r, a.files, a.logical) {
-                println!("  {:>10}  {}", format_size(t.size(f, a.logical), a.units), t.path(f).display());
+                println!(
+                    "  {:>10}  {}",
+                    format_size(t.size(f, a.logical), a.units),
+                    t.path(f).display()
+                );
             }
         }
     }
@@ -171,7 +182,11 @@ fn print_level(t: &Tree, n: NodeId, a: &Args, depth: usize) {
             format_size(size, a.units),
             size as f64 * 100.0 / total as f64,
             t.display_name(c),
-            if t.is_dir(c) { std::path::MAIN_SEPARATOR_STR } else { "" },
+            if t.is_dir(c) {
+                std::path::MAIN_SEPARATOR_STR
+            } else {
+                ""
+            },
             note
         );
         if t.is_dir(c) {
@@ -179,7 +194,12 @@ fn print_level(t: &Tree, n: NodeId, a: &Args, depth: usize) {
         }
     }
     if kids.len() > a.top {
-        println!("{}{:>10}  and {} more", "  ".repeat(depth), "", kids.len() - a.top);
+        println!(
+            "{}{:>10}  and {} more",
+            "  ".repeat(depth),
+            "",
+            kids.len() - a.top
+        );
     }
 }
 
@@ -209,7 +229,12 @@ fn json(t: &Tree, a: &Args) -> String {
         ));
         if t.is_dir(n) && depth < a.depth {
             out.push_str(",\"children\":[");
-            for (i, &c) in t.sorted_children(n, a.logical).iter().take(a.top).enumerate() {
+            for (i, &c) in t
+                .sorted_children(n, a.logical)
+                .iter()
+                .take(a.top)
+                .enumerate()
+            {
                 if i > 0 {
                     out.push(',');
                 }
@@ -241,7 +266,10 @@ fn bench(a: &Args) -> i32 {
     println!("on disk     {}", format_size(t.total(false), a.units));
     println!("logical     {}", format_size(t.total(true), a.units));
     println!("time        {}", format_duration(p.elapsed));
-    println!("rate        {} entries/s", format_count((p.entries as f64 / secs) as u64));
+    println!(
+        "rate        {} entries/s",
+        format_count((p.entries as f64 / secs) as u64)
+    );
     println!(
         "arena       {} ({:.1} bytes per entry, names included)",
         format_size(t.heap_bytes() as u64, Units::Binary),

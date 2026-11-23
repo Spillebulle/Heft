@@ -40,7 +40,7 @@ defect, and inheriting those is the point of the family.
 | Updates | Muster's `update` module, ported: releases API, conditional request, swaps the binary, never writes to a package manager's copy |
 | Distribution | The house archive, `../Packages` (§18 of the style guide). `.deb`/`.rpm`/Arch packages enrol the machine exactly as `../Packages/ENROLMENT.md` says |
 | Repo / id | `github.com/Spillebulle/heft`, application id `io.github.spillebulle.heft` |
-| Accent | `--accent-h` **100**, moss. Taken so far: Brokey 18, Windup 28, Umber 60/68, Muster 200, Bulle-Block 245, Tally 255, Pictureframe 254, Trove 310, Sheeets 330, HomeLab 349. 100 sits clear of Umber, of `good` (145) and of `caution`/`critical` (20 to 40) |
+| Accent | `--accent-h` **100**, olive (`#A59849` on Graphite). Taken so far: Brokey 18, Windup 28, Umber 60/68, Muster 200, Bulle-Block 245, Tally 255, Pictureframe 254, Trove 310, Sheeets 330, HomeLab 349. 100 sits clear of Umber, of `good` (145) and of `caution`/`critical` (20 to 40) |
 
 Rejected, so they do not come back:
 

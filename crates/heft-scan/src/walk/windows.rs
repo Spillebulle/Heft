@@ -14,17 +14,22 @@ use std::ffi::OsString;
 use std::io;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
-use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_FILES, GetLastError, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Foundation::{
+    ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_FILES, GetLastError, INVALID_HANDLE_VALUE,
+};
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_COMPRESSED, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_OFFLINE,
     FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS, FILE_ATTRIBUTE_RECALL_ON_OPEN,
-    FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_SPARSE_FILE, FIND_FIRST_EX_LARGE_FETCH,
-    FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindNextFileW,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_SPARSE_FILE, FIND_FIRST_EX_LARGE_FETCH, FindClose,
+    FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindNextFileW,
     GetCompressedFileSizeW, GetDiskFreeSpaceW, GetVolumePathNameW, WIN32_FIND_DATAW,
 };
 
 fn wide(p: &Path) -> Vec<u16> {
-    p.as_os_str().encode_wide().chain(std::iter::once(0)).collect()
+    p.as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 pub fn root_info(path: &Path) -> io::Result<RootInfo> {
@@ -73,7 +78,11 @@ pub fn read_dir(path: &Path, root: &RootInfo, want_mtime: bool) -> io::Result<Li
     let mut out = Listing::default();
     let cluster = root.cluster;
     loop {
-        let len = data.cFileName.iter().position(|&c| c == 0).unwrap_or(data.cFileName.len());
+        let len = data
+            .cFileName
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(data.cFileName.len());
         let name16 = &data.cFileName[..len];
         let skip = name16 == [b'.' as u16] || name16 == [b'.' as u16, b'.' as u16];
         if !skip {
@@ -86,15 +95,16 @@ pub fn read_dir(path: &Path, root: &RootInfo, want_mtime: bool) -> io::Result<Li
             } else {
                 Kind::File
             };
-            let disk = if kind != Kind::File {
-                0
-            } else if attr
-                & (FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
-                    | FILE_ATTRIBUTE_RECALL_ON_OPEN
-                    | FILE_ATTRIBUTE_OFFLINE)
-                != 0
+            // Folders and links take no space of their own here; a cloud
+            // placeholder's bytes are not on this disk.
+            let disk = if kind != Kind::File
+                || attr
+                    & (FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
+                        | FILE_ATTRIBUTE_RECALL_ON_OPEN
+                        | FILE_ATTRIBUTE_OFFLINE)
+                    != 0
             {
-                0 // a cloud placeholder: the bytes are not on this disk
+                0
             } else if attr & (FILE_ATTRIBUTE_COMPRESSED | FILE_ATTRIBUTE_SPARSE_FILE) != 0 {
                 compressed_size(&path.join(OsString::from_wide(name16))).unwrap_or(logical)
             } else if cluster > 0 {
@@ -110,7 +120,10 @@ pub fn read_dir(path: &Path, root: &RootInfo, want_mtime: bool) -> io::Result<Li
                     logical,
                     disk,
                     mtime: if want_mtime {
-                        filetime_secs(data.ftLastWriteTime.dwLowDateTime, data.ftLastWriteTime.dwHighDateTime)
+                        filetime_secs(
+                            data.ftLastWriteTime.dwLowDateTime,
+                            data.ftLastWriteTime.dwHighDateTime,
+                        )
                     } else {
                         0
                     },

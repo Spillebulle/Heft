@@ -51,7 +51,8 @@ pub struct Listing {
 impl Listing {
     pub(crate) fn push(&mut self, name: &[u8], raw: Raw) {
         let len = name.len().min(u16::MAX as usize);
-        self.entries.push((self.names.len() as u32, len as u16, raw));
+        self.entries
+            .push((self.names.len() as u32, len as u16, raw));
         self.names.extend_from_slice(&name[..len]);
     }
 }

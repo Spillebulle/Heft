@@ -6,7 +6,7 @@
 //! filesystems from round-tripping for freshness we do not need).
 
 use super::{Kind, Listing, Raw, RootInfo, clamp_secs};
-use rustix::fs::{AtFlags, Dir, Mode, OFlags, StatxFlags, CWD, FileType};
+use rustix::fs::{AtFlags, CWD, Dir, FileType, Mode, OFlags, StatxFlags};
 use std::io;
 use std::path::Path;
 
@@ -21,7 +21,10 @@ pub fn root_info(path: &Path) -> io::Result<RootInfo> {
         AtFlags::empty(),
         StatxFlags::TYPE | StatxFlags::INO,
     )?;
-    Ok(RootInfo { dev: dev(st.stx_dev_major, st.stx_dev_minor), cluster: 0 })
+    Ok(RootInfo {
+        dev: dev(st.stx_dev_major, st.stx_dev_minor),
+        cluster: 0,
+    })
 }
 
 pub fn read_dir(path: &Path, _root: &RootInfo, want_mtime: bool) -> io::Result<Listing> {
@@ -67,7 +70,11 @@ pub fn read_dir(path: &Path, _root: &RootInfo, want_mtime: bool) -> io::Result<L
                         kind,
                         logical: st.stx_size,
                         disk: st.stx_blocks * 512,
-                        mtime: if want_mtime { clamp_secs(st.stx_mtime.tv_sec) } else { 0 },
+                        mtime: if want_mtime {
+                            clamp_secs(st.stx_mtime.tv_sec)
+                        } else {
+                            0
+                        },
                         dev: dev(st.stx_dev_major, st.stx_dev_minor),
                         ino: st.stx_ino,
                         nlink: st.stx_nlink,
@@ -86,7 +93,15 @@ pub fn read_dir(path: &Path, _root: &RootInfo, want_mtime: bool) -> io::Result<L
                 out.unsizable += 1;
                 out.push(
                     bytes,
-                    Raw { kind, logical: 0, disk: 0, mtime: 0, dev: 0, ino: 0, nlink: 1 },
+                    Raw {
+                        kind,
+                        logical: 0,
+                        disk: 0,
+                        mtime: 0,
+                        dev: 0,
+                        ino: 0,
+                        nlink: 1,
+                    },
                 );
             }
         }

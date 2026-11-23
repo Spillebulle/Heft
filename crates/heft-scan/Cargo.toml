@@ -10,6 +10,9 @@ repository.workspace = true
 # The work-stealing pool the walker runs on: one task per directory.
 rayon = "1.10"
 log = { workspace = true }
+# Delete goes to the Recycle Bin / Trash: IFileOperation on Windows, the
+# freedesktop Trash spec (per-mount .Trash-$uid included) on Linux.
+trash = "5"
 
 # getdents64 and statx relative to a directory fd, without libc's per-entry
 # overhead or a C toolchain. Pure Rust, so the aarch64 cross-build is free.

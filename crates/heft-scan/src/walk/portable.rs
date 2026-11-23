@@ -39,7 +39,15 @@ pub fn read_dir(path: &Path, _root: &RootInfo, want_mtime: bool) -> io::Result<L
         };
         out.push(
             name.as_encoded_bytes(),
-            Raw { kind, logical: m.len(), disk: m.len(), mtime, dev: 0, ino: 0, nlink: 1 },
+            Raw {
+                kind,
+                logical: m.len(),
+                disk: m.len(),
+                mtime,
+                dev: 0,
+                ino: 0,
+                nlink: 1,
+            },
         );
     }
     Ok(out)

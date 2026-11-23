@@ -137,7 +137,8 @@ impl Tree {
         // A directory starts empty; its size is what its children add.
         let dir = meta.flags & flag::DIR != 0;
         self.disk.push(if dir || !counted { 0 } else { meta.disk });
-        self.logical.push(if dir || !counted { 0 } else { meta.logical });
+        self.logical
+            .push(if dir || !counted { 0 } else { meta.logical });
         self.files.push(is_file as u32);
         self.mtime.push(meta.mtime);
         let mut f = meta.flags;
@@ -235,7 +236,11 @@ impl Tree {
     }
     /// Size in the unit the user chose: on disk, or logical.
     pub fn size(&self, n: NodeId, logical: bool) -> u64 {
-        if logical { self.logical(n) } else { self.disk(n) }
+        if logical {
+            self.logical(n)
+        } else {
+            self.disk(n)
+        }
     }
     pub fn files(&self, n: NodeId) -> u32 {
         self.files[n as usize]
@@ -315,7 +320,7 @@ impl Tree {
             .children(n)
             .filter(|&c| !self.has(c, flag::REMOVED))
             .collect();
-        v.sort_unstable_by(|&a, &b| self.size(b, logical).cmp(&self.size(a, logical)));
+        v.sort_unstable_by_key(|&c| std::cmp::Reverse(self.size(c, logical)));
         v
     }
 
@@ -345,10 +350,18 @@ mod tests {
     use super::*;
 
     fn file(size: u64) -> EntryMeta {
-        EntryMeta { flags: 0, logical: size, disk: size, mtime: 10 }
+        EntryMeta {
+            flags: 0,
+            logical: size,
+            disk: size,
+            mtime: 10,
+        }
     }
     fn dir() -> EntryMeta {
-        EntryMeta { flags: flag::DIR, ..Default::default() }
+        EntryMeta {
+            flags: flag::DIR,
+            ..Default::default()
+        }
     }
     fn names(list: &[&str]) -> (Vec<u8>, Vec<(u32, u16)>) {
         let mut buf = Vec::new();
@@ -368,7 +381,11 @@ mod tests {
         let base = t.add_children(r, &b, &[(s[0].0, s[0].1, dir()), (s[1].0, s[1].1, file(5))]);
         let a = base;
         let (b, s) = names(&["x", "y"]);
-        t.add_children(a, &b, &[(s[0].0, s[0].1, file(100)), (s[1].0, s[1].1, file(1))]);
+        t.add_children(
+            a,
+            &b,
+            &[(s[0].0, s[0].1, file(100)), (s[1].0, s[1].1, file(1))],
+        );
         assert_eq!(t.disk(a), 101);
         assert_eq!(t.disk(r), 106);
         assert_eq!(t.files(r), 3);
@@ -381,7 +398,10 @@ mod tests {
         let mut t = Tree::new();
         let r = t.add_root(OsStr::new("/r"), dir());
         let (b, s) = names(&["one", "two"]);
-        let dup = EntryMeta { flags: flag::HARDLINK_DUP, ..file(50) };
+        let dup = EntryMeta {
+            flags: flag::HARDLINK_DUP,
+            ..file(50)
+        };
         t.add_children(r, &b, &[(s[0].0, s[0].1, file(50)), (s[1].0, s[1].1, dup)]);
         assert_eq!(t.disk(r), 50);
         assert_eq!(t.files(r), 1);

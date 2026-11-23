@@ -5,9 +5,9 @@
 //! thread. None of them allocates per node.
 
 use crate::kinds::{self, FileKind};
-use crate::tree::{flag, NodeId, Tree};
-use std::collections::{BinaryHeap, HashMap};
+use crate::tree::{NodeId, Tree, flag};
 use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap};
 
 /// Calls `f` for every live node under `root` (inclusive), depth first.
 pub fn walk_subtree(t: &Tree, root: NodeId, mut f: impl FnMut(NodeId)) {
@@ -43,7 +43,7 @@ pub fn largest_files(t: &Tree, root: NodeId, limit: usize, logical: bool) -> Vec
         }
     });
     let mut v: Vec<(u64, NodeId)> = heap.into_iter().map(|Reverse(x)| x).collect();
-    v.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+    v.sort_unstable_by_key(|x| Reverse(x.0));
     v.into_iter().map(|(_, n)| n).collect()
 }
 
@@ -71,13 +71,17 @@ pub fn by_extension(t: &Tree, root: NodeId, logical: bool) -> Vec<TypeStat> {
     let mut v: Vec<TypeStat> = map
         .into_iter()
         .map(|(ext, (bytes, count))| TypeStat {
-            kind: if ext.is_empty() { FileKind::Other } else { kinds::kind_of_ext(&ext) },
+            kind: if ext.is_empty() {
+                FileKind::Other
+            } else {
+                kinds::kind_of_ext(&ext)
+            },
             ext,
             bytes,
             count,
         })
         .collect();
-    v.sort_unstable_by(|a, b| b.bytes.cmp(&a.bytes));
+    v.sort_unstable_by_key(|s| Reverse(s.bytes));
     v
 }
 
@@ -114,7 +118,10 @@ pub fn by_age(t: &Tree, root: NodeId, now_secs: u64, logical: bool) -> Vec<(u64,
             AGE_BUCKETS.len()
         } else {
             let days = now_secs.saturating_sub(m) / 86_400;
-            AGE_BUCKETS.iter().position(|&(_, d)| days < d).unwrap_or(AGE_BUCKETS.len() - 1)
+            AGE_BUCKETS
+                .iter()
+                .position(|&(_, d)| days < d)
+                .unwrap_or(AGE_BUCKETS.len() - 1)
         };
         out[slot].0 += t.size(n, logical);
         out[slot].1 += 1;

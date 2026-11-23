@@ -1,0 +1,529 @@
+//! The token table, ported from `../Design-Principles/tokens.css`.
+//!
+//! `CLAUDE.md`: port it rather than re-deriving it, and keep the size table
+//! identical — the point of the numbers is that they are the same in every app
+//! in the family. So the sizes below are `tokens.css`'s values transcribed, and
+//! a change to one of them is a change to the house style rather than to Heft.
+//!
+//! ## The accent is derived, not picked
+//!
+//! `--accent-h` is the one number an app sets, and everything accent-coloured
+//! comes out of it: `oklch(0.674 0.101 h)` for the accent and
+//! `oklch(0.447 0.061 h)` for its muted twin, in both themes. Heft's hue is
+//! **100**, olive. Writing the resulting sRGB values in as constants would
+//! work and would be wrong — it breaks the property that the hue is a single
+//! knob, and the next app in the family copies the constants instead of the
+//! recipe. [`oklch`] is therefore a real conversion, forty lines, and the tests
+//! check it against the hexes `tokens.css` records in its own comments.
+//!
+//! The **neutrals** are the family's and are not derived from anything: they are
+//! a hand-picked ladder at hue 264 (dark) and 82 (light), and `tokens.css`
+//! states them in OKLCH so they read as a recipe. They go through the same
+//! conversion for the same reason.
+
+use egui::Color32;
+
+/// Heft's hue, olive. See CLAUDE.md for the hues the family has taken.
+pub const ACCENT_H: f32 = 100.0;
+
+/// Chrome sizes. Every one of these is `tokens.css`'s, and none of them is
+/// Heft's to change.
+pub mod metrics {
+    /// The top bar, with the accent mark at its left.
+    pub const MENU_BAR: f32 = 34.0;
+    pub const STATUS_BAR: f32 = 26.0;
+    /// The navigation column.
+    pub const SIDEBAR: f32 = 240.0;
+    /// A docked panel column, where Heft grows one.
+    pub const PANEL: f32 = 264.0;
+    /// A navigation row in the sidebar.
+    pub const NAV_ROW: f32 = 30.0;
+    /// A list row that is only text, which is what a device row is.
+    pub const ROW_PLAIN: f32 = 20.0;
+    /// A list row carrying a picture or a control.
+    pub const ROW: f32 = 26.0;
+    pub const BUTTON: f32 = 26.0;
+    pub const FIELD: f32 = 26.0;
+    /// Horizontal padding inside every strip.
+    pub const PAD_STRIP: f32 = 12.0;
+    pub const PAD_PANEL: f32 = 12.0;
+
+    pub const RADIUS_TIGHT: f32 = 3.0;
+    pub const RADIUS: f32 = 5.0;
+    pub const RADIUS_TOOL: f32 = 6.0;
+    pub const RADIUS_CARD: f32 = 8.0;
+    pub const RADIUS_MODAL: f32 = 10.0;
+
+    /// The app mark: a rounded square in the accent, no glyph in it.
+    pub const MARK: f32 = 15.0;
+    pub const ICON: f32 = 16.0;
+    pub const HAIRLINE: f32 = 1.0;
+
+    /// A slider's and a progress bar's track. §7.10 and §7.18 both say 3.
+    pub const RAIL: f32 = 3.0;
+
+    /// The options strip under the top bar, §7.2. Two points taller than the
+    /// menu bar, which is what keeps a 26 px control centred in it with room
+    /// to breathe.
+    pub const OPTIONS_STRIP: f32 = 36.0;
+
+    /// The accent bar down the left of a selected navigation row.
+    pub const NAV_MARK_W: f32 = 3.0;
+
+    pub const DASH: f32 = 5.0;
+    pub const DASH_GAP: f32 = 4.0;
+
+    /// Spacing scale.
+    pub const S1: f32 = 4.0;
+    pub const S2: f32 = 8.0;
+    pub const S3: f32 = 12.0;
+    pub const S4: f32 = 16.0;
+}
+
+/// The one strong family.
+///
+/// **§4 allows exactly two weights in an interface, 400 and 600**, and until
+/// now Heft had one — the wrong one. `Archivo.ttf` is a *variable* font whose
+/// default instance is SemiBold, and `ab_glyph`, which egui rasterises with,
+/// does not apply variation axes: it draws the outlines it finds, so every word
+/// in the application was 600. Body copy, table rows, tooltips, all of it.
+///
+/// The fix is two static instances cut from that variable font at build time
+/// and committed beside it, so 400 is the default family and this is the one
+/// that headings and the primary button ask for by name.
+pub const STRONG: &str = "archivo-semibold";
+
+/// A 600-weight font at `size`.
+///
+/// The only way to get the heavier weight, so that "which things are bold" is
+/// answerable by searching for this function.
+pub fn strong(size: f32) -> egui::FontId {
+    egui::FontId::new(size, egui::FontFamily::Name(STRONG.into()))
+}
+
+/// The type scale. Four ranks plus the figure size, and never a fifth.
+pub mod text {
+    /// A page heading, which is what a settings pane's title is. §4's rank
+    /// above `HEADING`, and the only place in Heft large enough to want it.
+    pub const PAGE: f32 = 15.0;
+    /// An eyebrow: the small upper-case label over a group of rows. §4 tracks
+    /// it 2 px, which egui cannot express, so it is written down as a
+    /// departure rather than silently drawn wrong.
+    pub const EYEBROW: f32 = 10.0;
+    pub const HEADING: f32 = 13.0;
+    pub const BODY: f32 = 12.0;
+    pub const CONTROL: f32 = 11.5;
+    pub const SMALL: f32 = 11.0;
+    /// Figures, the status bar, chips. Monospaced and tabular wherever it is a
+    /// number that lines up under another number.
+    pub const TINY: f32 = 10.5;
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    Dark,
+    Light,
+}
+
+/// Every colour the interface may draw with.
+///
+/// A component never names a colour that is not here; `CLAUDE.md` and the style
+/// guide both make that the rule, and the reason is that a hex in a widget is a
+/// colour the theme cannot move.
+#[derive(Clone, Copy, Debug)]
+pub struct Palette {
+    pub backdrop: Color32,
+    pub window: Color32,
+    pub dock: Color32,
+    pub chrome: Color32,
+    pub popover: Color32,
+
+    pub line_soft: Color32,
+    pub line: Color32,
+    pub line_popover: Color32,
+    pub line_dashed: Color32,
+
+    pub control: Color32,
+    pub control_hover: Color32,
+    /// The unfilled part of a slider, and the track of a progress bar.
+    pub rail: Color32,
+    /// The knob on a slider or a toggle.
+    pub knob: Color32,
+    /// The one accent-tinted neutral in the family, and it must stay the only
+    /// one: selection is a neutral fill plus strong text plus a small accent
+    /// mark, never an accent background.
+    pub control_active: Color32,
+    pub field: Color32,
+
+    pub text_strong: Color32,
+    pub text: Color32,
+    pub text_muted: Color32,
+    pub text_dim: Color32,
+    pub placeholder: Color32,
+
+    pub accent: Color32,
+    pub accent_dim: Color32,
+    /// The focus ring, §7.11: the accent at a little over a third, drawn 2 px
+    /// around whatever has the keyboard.
+    pub accent_ring: Color32,
+    /// The accent at 7 %, for the one tinted row §2.4 allows.
+    pub accent_tint: Color32,
+    /// Text drawn **on** the accent, and the only place that is allowed: the
+    /// one primary button in a view. §2.4's list of where the accent may go is
+    /// short and a fill behind body copy is not on it.
+    pub accent_ink: Color32,
+
+    /// State, never decoration.
+    pub caution: Color32,
+    /// The tint behind a caution badge, and its edge.
+    pub caution_bg: Color32,
+    pub caution_line: Color32,
+    pub good: Color32,
+    pub critical: Color32,
+
+    /// The six chart series, in order.
+    ///
+    /// Heft draws no chart yet, and they are here anyway: they are six of the
+    /// twenty-seven keys a `.umbertheme` file carries, so a palette without
+    /// them could not round-trip a theme somebody made in a sibling
+    /// application. See `themelib`.
+    pub series: [Color32; 6],
+}
+
+impl Palette {
+    pub fn of(mode: Mode) -> Self {
+        match mode {
+            Mode::Dark => Self::dark(),
+            Mode::Light => Self::light(),
+        }
+    }
+
+    /// Graphite. Cool grey, hue 264, chroma at most 0.008.
+    pub fn dark() -> Self {
+        Self {
+            backdrop: oklch(0.164, 0.005, 264.0),
+            window: oklch(0.182, 0.004, 264.0),
+            dock: oklch(0.195, 0.004, 264.0),
+            chrome: oklch(0.209, 0.004, 264.0),
+            popover: oklch(0.227, 0.006, 271.0),
+
+            line_soft: oklch(0.243, 0.006, 258.0),
+            line: oklch(0.276, 0.006, 258.0),
+            line_popover: oklch(0.301, 0.008, 264.0),
+            line_dashed: oklch(0.359, 0.010, 261.0),
+
+            control: oklch(0.244, 0.006, 271.0),
+            control_hover: oklch(0.276, 0.006, 258.0),
+            rail: oklch(0.276, 0.006, 258.0),
+            knob: oklch(0.928, 0.003, 265.0),
+            control_active: oklch(0.29, 0.012, ACCENT_H),
+            field: oklch(0.195, 0.004, 264.0),
+
+            text_strong: oklch(0.928, 0.003, 265.0),
+            text: oklch(0.841, 0.005, 258.0),
+            text_muted: oklch(0.695, 0.008, 261.0),
+            text_dim: oklch(0.622, 0.008, 261.0),
+            placeholder: oklch(0.481, 0.009, 261.0),
+
+            accent: oklch(0.674, 0.101, ACCENT_H),
+            accent_dim: oklch(0.447, 0.061, ACCENT_H),
+            accent_ring: oklch(0.674, 0.101, ACCENT_H).gamma_multiply(0.35),
+            accent_tint: oklch(0.674, 0.101, ACCENT_H).gamma_multiply(0.07),
+            // `window` in the dark theme, per §2.3: near-black on a light
+            // accent, rather than a black that belongs to no theme.
+            accent_ink: oklch(0.182, 0.004, 264.0),
+
+            caution: oklch(0.693, 0.096, 38.0),
+            caution_bg: oklch(0.245, 0.023, 42.0),
+            caution_line: oklch(0.424, 0.068, 35.0),
+            good: oklch(0.70, 0.10, 145.0),
+            critical: oklch(0.66, 0.13, 22.0),
+            series: [
+                Color32::from_rgb(0x3F, 0x7B, 0xE8),
+                Color32::from_rgb(0x46, 0xB0, 0x4A),
+                Color32::from_rgb(0xA9, 0x6B, 0xE8),
+                Color32::from_rgb(0x1F, 0xB5, 0xB5),
+                Color32::from_rgb(0xEE, 0x5A, 0xA8),
+                Color32::from_rgb(0xF0, 0xD5, 0x3C),
+            ],
+        }
+    }
+
+    /// Paper. Warm greys, hue 82, the same ladder and the same ranks.
+    pub fn light() -> Self {
+        Self {
+            backdrop: oklch(0.908, 0.010, 82.0),
+            window: oklch(0.944, 0.007, 81.0),
+            dock: oklch(0.953, 0.007, 81.0),
+            chrome: oklch(0.971, 0.006, 85.0),
+            popover: Color32::WHITE,
+
+            line_soft: oklch(0.915, 0.008, 82.0),
+            line: oklch(0.890, 0.010, 82.0),
+            line_popover: oklch(0.890, 0.010, 82.0),
+            line_dashed: oklch(0.80, 0.012, 82.0),
+
+            control: oklch(0.929, 0.009, 85.0),
+            control_hover: oklch(0.896, 0.010, 82.0),
+            rail: oklch(0.890, 0.010, 82.0),
+            knob: Color32::WHITE,
+            control_active: oklch(0.909, 0.020, ACCENT_H),
+            field: Color32::WHITE,
+
+            text_strong: oklch(0.342, 0.004, 68.0),
+            text: oklch(0.342, 0.004, 68.0),
+            text_muted: oklch(0.526, 0.007, 75.0),
+            text_dim: oklch(0.634, 0.008, 81.0),
+            placeholder: oklch(0.72, 0.008, 81.0),
+
+            // The accent is darkened for a light ground so it still reads
+            // against it; the hue and the recipe are the same.
+            //
+            // **These are `tokens.css`'s figures, and four of them had drifted.**
+            // The dark ladder is checked against the style guide by a test and
+            // the light one was not, so `accent` carried chroma 0.11 where the
+            // guide says 0.10, `accent_dim` was a hand-picked pair rather than
+            // the guide's `0.79 0.036`, and caution, good and critical were each
+            // a little off. That is exactly the drift an untested table gets.
+            accent: oklch(0.55, 0.10, ACCENT_H),
+            accent_dim: oklch(0.79, 0.036, ACCENT_H),
+            accent_ring: oklch(0.55, 0.10, ACCENT_H).gamma_multiply(0.35),
+            accent_tint: oklch(0.55, 0.10, ACCENT_H).gamma_multiply(0.07),
+            accent_ink: Color32::WHITE,
+
+            caution: oklch(0.518, 0.114, 39.0),
+            caution_bg: oklch(0.943, 0.018, 49.0),
+            caution_line: oklch(0.832, 0.042, 51.0),
+            good: oklch(0.50, 0.11, 145.0),
+            critical: oklch(0.50, 0.14, 22.0),
+            series: [
+                Color32::from_rgb(0x2A, 0x5A, 0xB4),
+                Color32::from_rgb(0x2E, 0x7C, 0x33),
+                Color32::from_rgb(0x77, 0x42, 0xAE),
+                Color32::from_rgb(0x13, 0x7F, 0x7F),
+                Color32::from_rgb(0xB0, 0x32, 0x6E),
+                Color32::from_rgb(0x7E, 0x76, 0x0A),
+            ],
+        }
+    }
+}
+
+/// The three shadows §5 allows, and nothing else casts one.
+///
+/// The geometry is the style guide's table verbatim. **A light theme uses the
+/// same geometry at about a quarter of the alpha**, warm-tinted, because a
+/// black shadow that reads as depth on Graphite reads as dirt on Paper.
+pub mod shadow {
+    use super::Mode;
+    use egui::Color32;
+    use egui::epaint::Shadow;
+
+    /// A menu, a dropdown list, a tooltip.
+    pub fn menu(mode: Mode) -> Shadow {
+        build(mode, 8, 32, 153)
+    }
+
+    /// A floating panel: an undocked module, or the device window.
+    pub fn floating(mode: Mode) -> Shadow {
+        build(mode, 16, 48, 178)
+    }
+
+    /// A modal dialog.
+    pub fn modal(mode: Mode) -> Shadow {
+        build(mode, 24, 64, 178)
+    }
+
+    fn build(mode: Mode, offset: i8, blur: u8, alpha: u8) -> Shadow {
+        let color = match mode {
+            Mode::Dark => Color32::from_black_alpha(alpha),
+            // A quarter of the alpha, and warm rather than neutral: the light
+            // ladder is a warm grey and a cold shadow on it looks like a
+            // different application's dialog.
+            Mode::Light => Color32::from_rgba_unmultiplied(60, 50, 40, alpha / 4),
+        };
+        Shadow {
+            offset: [0, offset],
+            blur,
+            spread: 0,
+            color,
+        }
+    }
+}
+
+/// A colour at `hue`, on the accent's own lightness and chroma.
+///
+/// The one sanctioned way to get a colour that is not in [`Palette`], and it
+/// exists for exactly one caller: the device icons, which need to tell a printer
+/// from a television at a glance and cannot do it in one hue.
+///
+/// **It is the accent's recipe with the hue moved, and nothing else.** That is
+/// what keeps a dozen icons looking like one family rather than a bag of
+/// stickers: every one of them has the same weight and saturation as the accent
+/// the rest of the interface is painted in, and both themes are handled by the
+/// same two numbers the accent uses. A hand-picked hex per device kind would
+/// drift from the palette the first time a theme moved.
+pub fn hued(hue: f32, mode: Mode) -> Color32 {
+    match mode {
+        Mode::Dark => oklch(0.674, 0.101, hue),
+        Mode::Light => oklch(0.55, 0.11, hue),
+    }
+}
+
+/// OKLCH to sRGB.
+///
+/// `L` is 0..1, `C` is chroma, `h` is degrees. The matrices are the standard
+/// ones from Björn Ottosson's definition; the only thing worth watching is the
+/// clamp at the end, which is what happens to a colour outside the sRGB gamut —
+/// and every colour in the table above is inside it, so the clamp never fires
+/// for the family's own tokens.
+pub fn oklch(l: f32, c: f32, h_deg: f32) -> Color32 {
+    let h = h_deg.to_radians();
+    let (a, b) = (c * h.cos(), c * h.sin());
+
+    let l_ = l + 0.396_337_78 * a + 0.215_803_76 * b;
+    let m_ = l - 0.105_561_346 * a - 0.063_854_17 * b;
+    let s_ = l - 0.089_484_18 * a - 1.291_485_5 * b;
+
+    let (lc, mc, sc) = (l_ * l_ * l_, m_ * m_ * m_, s_ * s_ * s_);
+
+    let r = 4.076_741_7 * lc - 3.307_711_6 * mc + 0.230_969_94 * sc;
+    let g = -1.268_438 * lc + 2.609_757_4 * mc - 0.341_319_38 * sc;
+    let bl = -0.004_196_086_3 * lc - 0.703_418_6 * mc + 1.707_614_7 * sc;
+
+    Color32::from_rgb(to_srgb(r), to_srgb(g), to_srgb(bl))
+}
+
+/// Linear light to an sRGB byte, with the standard transfer curve.
+fn to_srgb(v: f32) -> u8 {
+    let v = v.clamp(0.0, 1.0);
+    let encoded = if v <= 0.003_130_8 {
+        12.92 * v
+    } else {
+        1.055 * v.powf(1.0 / 2.4) - 0.055
+    };
+    (encoded * 255.0).round().clamp(0.0, 255.0) as u8
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn near(got: Color32, want: (u8, u8, u8), tolerance: i32, what: &str) {
+        let (r, g, b) = (got.r() as i32, got.g() as i32, got.b() as i32);
+        let (wr, wg, wb) = (want.0 as i32, want.1 as i32, want.2 as i32);
+        let off = (r - wr).abs().max((g - wg).abs()).max((b - wb).abs());
+        assert!(
+            off <= tolerance,
+            "{what}: got #{r:02X}{g:02X}{b:02X}, wanted #{wr:02X}{wg:02X}{wb:02X} (off by {off})"
+        );
+    }
+
+    /// `tokens.css` records the sRGB value of each neutral in a comment beside
+    /// its OKLCH recipe. Those comments are the check on this conversion: if
+    /// the maths here is wrong, Heft's greys are quietly a different family's
+    /// greys and nothing else would ever say so.
+    #[test]
+    fn the_dark_ladder_matches_the_hexes_tokens_css_records() {
+        let p = Palette::dark();
+        near(p.backdrop, (0x0D, 0x0E, 0x10), 2, "--backdrop");
+        near(p.window, (0x11, 0x12, 0x14), 2, "--window");
+        near(p.dock, (0x14, 0x15, 0x17), 2, "--dock");
+        near(p.chrome, (0x17, 0x18, 0x1A), 2, "--chrome");
+        near(p.popover, (0x1B, 0x1C, 0x1F), 2, "--popover");
+        near(p.line, (0x26, 0x28, 0x2B), 2, "--line");
+        near(p.line_popover, (0x2C, 0x2E, 0x32), 2, "--line-popover");
+        near(p.line_dashed, (0x3A, 0x3D, 0x42), 2, "--line-dashed");
+        near(p.control, (0x1F, 0x20, 0x23), 2, "--control");
+        near(p.text_strong, (0xE6, 0xE7, 0xE9), 2, "--text-strong");
+        near(p.text, (0xC9, 0xCB, 0xCE), 2, "--text");
+        near(p.text_muted, (0x9A, 0x9D, 0xA2), 2, "--text-muted");
+        near(p.text_dim, (0x84, 0x87, 0x8C), 2, "--text-dim");
+        near(p.placeholder, (0x5B, 0x5E, 0x63), 2, "--placeholder");
+    }
+
+    #[test]
+    fn the_light_ladder_matches_too() {
+        let p = Palette::light();
+        near(p.backdrop, (0xE4, 0xE0, 0xD9), 2, "--backdrop");
+        near(p.line, (0xDE, 0xDA, 0xD3), 2, "--line");
+        near(p.control, (0xEA, 0xE7, 0xE1), 2, "--control");
+        near(p.text_strong, (0x3A, 0x38, 0x36), 2, "--text-strong");
+        near(p.text_muted, (0x6D, 0x6A, 0x66), 2, "--text-muted");
+    }
+
+    /// The recipe is the thing, not the value: at Umber's hue the same formula
+    /// must give Umber's ochre. That is what proves the accent is derived
+    /// rather than transcribed, and that Heft could not have quietly picked a
+    /// colour of its own.
+    #[test]
+    fn the_accent_recipe_reproduces_umbers_ochre_at_umbers_hue() {
+        near(
+            oklch(0.674, 0.101, 68.0),
+            (0xC0, 0x8A, 0x4E),
+            3,
+            "Umber accent",
+        );
+        near(
+            oklch(0.447, 0.061, 68.0),
+            (0x6B, 0x4E, 0x2E),
+            3,
+            "Umber accent-dim",
+        );
+    }
+
+    /// And Heft's own is an olive: red and green close together, blue well
+    /// below both (#A59849 in the dark theme).
+    #[test]
+    fn hefts_accent_is_an_olive() {
+        let a = Palette::dark().accent;
+        assert!(
+            (a.r() as i32 - a.g() as i32).abs() < 24,
+            "not an olive: {a:?}"
+        );
+        assert!(
+            a.b() + 60 < a.r().min(a.g()),
+            "too cool to be an olive: {a:?}"
+        );
+    }
+
+    /// Every app in the family shares these numbers, so a change here is a
+    /// change to the house style. Pinning them is what makes that deliberate.
+    #[test]
+    fn the_size_table_is_the_familys() {
+        assert_eq!(metrics::MENU_BAR, 34.0);
+        assert_eq!(metrics::STATUS_BAR, 26.0);
+        assert_eq!(metrics::SIDEBAR, 240.0);
+        assert_eq!(metrics::PANEL, 264.0);
+        assert_eq!(metrics::RADIUS, 5.0);
+        assert_eq!(metrics::RADIUS_CARD, 8.0);
+        assert_eq!(metrics::MARK, 15.0);
+        assert_eq!(text::HEADING, 13.0);
+        assert_eq!(text::TINY, 10.5);
+    }
+
+    /// A colour outside the gamut is clamped rather than wrapping into a
+    /// different hue, which is the failure that would be hardest to see: a
+    /// wrapped channel turns a too-saturated cyan into an orange, and nothing
+    /// downstream would question it.
+    #[test]
+    fn an_out_of_gamut_colour_clamps_instead_of_wrapping() {
+        // Chroma 0.4 at this lightness is well outside sRGB.
+        let wild = oklch(0.9, 0.4, 200.0);
+        assert!(
+            wild.b() > wild.r() && wild.g() > wild.r(),
+            "clamping turned a cyan into something else: {wild:?}"
+        );
+        // Clamping means at least one channel has hit a rail.
+        assert!(
+            [wild.r(), wild.g(), wild.b()]
+                .iter()
+                .any(|&c| c == 0 || c == 255),
+            "expected a channel at the gamut boundary: {wild:?}"
+        );
+
+        let black = oklch(0.0, 0.0, 0.0);
+        assert_eq!((black.r(), black.g(), black.b()), (0, 0, 0));
+        let white = oklch(1.0, 0.0, 0.0);
+        assert_eq!((white.r(), white.g(), white.b()), (255, 255, 255));
+    }
+}

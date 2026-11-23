@@ -10,7 +10,7 @@
 //! partial total while the scan runs, and final once its `COMPLETE` flag is
 //! set. A folder is complete when it and every folder under it has been read.
 
-use crate::tree::{EntryMeta, NodeId, Tree, flag, NONE};
+use crate::tree::{EntryMeta, NONE, NodeId, Tree, flag};
 use crate::walk::{self, Kind, RootInfo};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
@@ -32,7 +32,11 @@ pub struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        Self { cross_filesystems: false, threads: 0, mtime: true }
+        Self {
+            cross_filesystems: false,
+            threads: 0,
+            mtime: true,
+        }
     }
 }
 
@@ -216,7 +220,10 @@ fn fs_path_in(s: &Shared, t: &Tree, node: NodeId) -> PathBuf {
         cur = t.parent(cur);
     }
     let ri = t.roots().iter().position(|&r| r == cur).unwrap_or(0);
-    let mut p = roots.get(ri).map(|r| r.fs_path.clone()).unwrap_or_else(|| t.path(cur));
+    let mut p = roots
+        .get(ri)
+        .map(|r| r.fs_path.clone())
+        .unwrap_or_else(|| t.path(cur));
     for &c in chain.iter().rev() {
         p.push(t.name(c));
     }
@@ -266,27 +273,51 @@ fn add_root(s: &Arc<Shared>, p: &Path) -> Option<Job> {
     let mut t = s.tree.write().unwrap();
     let ri = {
         let mut roots = s.roots.lock().unwrap();
-        roots.push(Root { fs_path: fs_path.clone(), info });
+        roots.push(Root {
+            fs_path: fs_path.clone(),
+            info,
+        });
         roots.len() - 1
     };
     match meta {
         Ok(m) if m.is_dir() => {
-            let id = t.add_root(display.as_os_str(), EntryMeta { flags: flag::DIR, ..Default::default() });
+            let id = t.add_root(
+                display.as_os_str(),
+                EntryMeta {
+                    flags: flag::DIR,
+                    ..Default::default()
+                },
+            );
             if walk::is_virtual_fs(&fs_path) {
                 t.set_flag(id, flag::VIRTUAL | flag::COMPLETE);
                 return None;
             }
-            Some(Job { node: id, path: fs_path, root: ri })
+            Some(Job {
+                node: id,
+                path: fs_path,
+                root: ri,
+            })
         }
         Ok(m) => {
             t.add_root(
                 display.as_os_str(),
-                EntryMeta { flags: 0, logical: m.len(), disk: m.len(), mtime: 0 },
+                EntryMeta {
+                    flags: 0,
+                    logical: m.len(),
+                    disk: m.len(),
+                    mtime: 0,
+                },
             );
             None
         }
         Err(_) => {
-            let id = t.add_root(display.as_os_str(), EntryMeta { flags: flag::DIR, ..Default::default() });
+            let id = t.add_root(
+                display.as_os_str(),
+                EntryMeta {
+                    flags: flag::DIR,
+                    ..Default::default()
+                },
+            );
             t.set_flag(id, flag::UNREADABLE | flag::COMPLETE);
             None
         }
@@ -295,7 +326,9 @@ fn add_root(s: &Arc<Shared>, p: &Path) -> Option<Job> {
 
 fn run(s: &Arc<Shared>, jobs: Vec<Job>) {
     let threads = if s.opts.threads == 0 {
-        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4)
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
     } else {
         s.opts.threads
     };
@@ -311,7 +344,8 @@ fn run(s: &Arc<Shared>, jobs: Vec<Job>) {
             scope.spawn(move |sc| visit(sc, s, infos, job));
         }
     });
-    s.elapsed_ms.store(s.started.elapsed().as_millis() as u64, Ordering::Release);
+    s.elapsed_ms
+        .store(s.started.elapsed().as_millis() as u64, Ordering::Release);
     s.finished.store(true, Ordering::Release);
     s.generation.fetch_add(1, Ordering::Release);
 }
@@ -344,7 +378,9 @@ fn visit<'a>(scope: &rayon::Scope<'a>, s: &'a Arc<Shared>, infos: &'a [RootInfo]
                 let crosses = raw.dev != 0 && info.dev != 0 && raw.dev != info.dev;
                 if crosses && !s.opts.cross_filesystems {
                     f |= flag::OTHER_FS | flag::COMPLETE;
-                } else if crosses && walk::is_virtual_fs(&path.join(name_of(&listing.names, off, len))) {
+                } else if crosses
+                    && walk::is_virtual_fs(&path.join(name_of(&listing.names, off, len)))
+                {
                     f |= flag::VIRTUAL | flag::COMPLETE;
                 } else {
                     descend.push(i);
@@ -362,7 +398,16 @@ fn visit<'a>(scope: &rayon::Scope<'a>, s: &'a Arc<Shared>, infos: &'a [RootInfo]
         if f & flag::HARDLINK_DUP == 0 {
             bytes += raw.disk;
         }
-        metas.push((off, len, EntryMeta { flags: f, logical: raw.logical, disk: raw.disk, mtime: raw.mtime }));
+        metas.push((
+            off,
+            len,
+            EntryMeta {
+                flags: f,
+                logical: raw.logical,
+                disk: raw.disk,
+                mtime: raw.mtime,
+            },
+        ));
     }
 
     let base = {
@@ -378,7 +423,8 @@ fn visit<'a>(scope: &rayon::Scope<'a>, s: &'a Arc<Shared>, infos: &'a [RootInfo]
     s.entries.fetch_add(metas.len() as u64, Ordering::Relaxed);
     s.dirs.fetch_add(1, Ordering::Relaxed);
     s.bytes.fetch_add(bytes, Ordering::Relaxed);
-    s.unsizable.fetch_add(listing.unsizable as u64, Ordering::Relaxed);
+    s.unsizable
+        .fetch_add(listing.unsizable as u64, Ordering::Relaxed);
     s.generation.fetch_add(1, Ordering::Release);
 
     for i in descend {
@@ -394,7 +440,9 @@ fn visit<'a>(scope: &rayon::Scope<'a>, s: &'a Arc<Shared>, infos: &'a [RootInfo]
 
 fn name_of(names: &[u8], off: u32, len: u16) -> &OsStr {
     // SAFETY: the walker filled `names` from `OsStr::as_encoded_bytes`.
-    unsafe { OsStr::from_encoded_bytes_unchecked(&names[off as usize..off as usize + len as usize]) }
+    unsafe {
+        OsStr::from_encoded_bytes_unchecked(&names[off as usize..off as usize + len as usize])
+    }
 }
 
 /// Marks `node` complete, then any ancestor whose last outstanding folder

@@ -9,3 +9,29 @@ repository.workspace = true
 [dependencies]
 heft-scan = { workspace = true }
 log = { workspace = true }
+
+# egui + wgpu through winit, the family's stack, at the version Muster pins
+# (0.32) so the two interfaces stay one language. `default-features = false`
+# drops the glow backend; `wayland` and `x11` are how the window opens on Linux
+# at all, `accesskit` is the screen reader bridge, and `persistence` keeps the
+# handful of settings (units, sizes, theme, folders) between runs.
+eframe = { version = "0.32", default-features = false, features = [
+    "wgpu",
+    "default_fonts",
+    "wayland",
+    "x11",
+    "accesskit",
+    "persistence",
+] }
+egui = "0.32"
+# Naming wgpu puts its default backends back (Dx12/Vulkan on Windows,
+# Vulkan/GL on Linux), which `default-features = false` above removed.
+wgpu = "25"
+# The native folder picker (portal on Linux), as Umber and Windup use.
+rfd = "0.17.2"
+
+# Headless rendering of the real window for screenshot checks
+# (`cargo test -p heft-app --test shots -- --ignored`), which works with no
+# display and a locked screen.
+[dev-dependencies]
+egui_kittest = { version = "0.32", features = ["wgpu", "snapshot", "eframe"] }
