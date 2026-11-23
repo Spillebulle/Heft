@@ -1,0 +1,26 @@
+[package]
+name = "heft-scan"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# The work-stealing pool the walker runs on: one task per directory.
+rayon = "1.10"
+log = { workspace = true }
+
+# getdents64 and statx relative to a directory fd, without libc's per-entry
+# overhead or a C toolchain. Pure Rust, so the aarch64 cross-build is free.
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "1", features = ["fs"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+] }
+
+[dev-dependencies]
+tempfile = "3"

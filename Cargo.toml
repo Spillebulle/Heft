@@ -1,0 +1,31 @@
+[workspace]
+resolver = "3"
+members = ["crates/heft-scan", "crates/heft-app", "crates/heft-desktop"]
+default-members = ["crates/heft-desktop"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.90"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/Spillebulle/heft"
+authors = ["Heft contributors"]
+
+[workspace.dependencies]
+heft-scan = { path = "crates/heft-scan" }
+heft-app = { path = "crates/heft-app" }
+log = "0.4"
+env_logger = "0.11"
+
+# Our own crates stay quick to recompile; dependencies are built optimised.
+# The walker is still only ever *measured* in --release (CLAUDE.md).
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

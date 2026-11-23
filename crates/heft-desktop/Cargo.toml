@@ -1,0 +1,17 @@
+[package]
+name = "heft-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "heft"
+path = "src/main.rs"
+
+[dependencies]
+heft-scan = { workspace = true }
+heft-app = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
