@@ -10,8 +10,15 @@ with a window, Windows and Linux, installable and self-updating like the rest
 of the family. The name is the weight of a thing in the hand, which is the one
 question the app answers about every folder: how heavy is this?
 
-**Not started.** Nothing below is code yet. Everything is the decided shape;
-treat "Decisions" and "Invariants" as settled (they were reasoned about before
+**Early, not released.** Built: the scan engine (Linux and Windows folder
+walkers, the arena, hard-link and mount accounting, reports), the text mode,
+the window with the Folders, Treemap, File types, Largest files and Age views,
+the disk list, and delete to Trash / permanently. **Not built:** packaging,
+the updater, the release workflow, the NTFS MFT walker and its elevated
+helper, owner lookup and the Brokey handoff, Sunburst, Duplicates,
+Suggestions. `README.md`'s "What is not there yet" is the user-facing list and
+is kept honest. Where this file describes something not yet built, it is the
+decided shape. Treat "Decisions" and "Invariants" as settled (they were reasoned about before
 the first line, and re-litigating them costs more than following them) and
 "Open" as genuinely open. When code and this file disagree, either the code is
 wrong or this file is stale, and the fix is to make them agree in the same
@@ -54,20 +61,28 @@ Rejected, so they do not come back:
 
 ## Commands
 
-Planned; keep this list true as they come into existence.
+These all run.
 
 ```sh
 cargo run --release                          # the window
-cargo run --release -- scan ~/ --top 20      # text mode, same engine
-cargo run --release -- scan C:\ --json       # machine-readable, for tests and comparison
-cargo run --release -- bench <path>          # timed scan: entries, bytes, seconds, entries/s, peak memory
+cargo run --release -- <path> [--view treemap]   # the window, scanning <path> at once
+cargo run --release -- scan ~/ --depth 2     # text mode, same engine (--files N, --logical, --json)
+cargo run --release -- bench <path>          # entries, seconds, entries/s, arena bytes per entry
 cargo test --workspace                       # everything
-cargo test -p heft-scan                      # engine only, synthetic trees in a tempdir, fast
-cargo bench -p heft-scan                     # criterion: walker, tree build, treemap layout
+cargo test -p heft-scan                      # engine only: real temp trees, fast
 cargo clippy --workspace --all-targets
 cargo fmt --all
-sh packaging/check.sh                        # application id and archive paths agree everywhere
+cargo check -p heft-scan --target x86_64-unknown-linux-gnu   # the Linux walker, from Windows
+
+# Headless screenshots of the real window (works with no display or a locked
+# screen), written to target/shots/: every view dark, two light.
+HEFT_SHOT_ROOT=<folder> cargo test --release -p heft-app --test shots -- --ignored --nocapture
 ```
+
+The Linux-only walker tests (hard link counted once, unreadable folder
+reported, symlink not followed) cannot run on the Windows development machine,
+which has no WSL; CI's Ubuntu runners are where they run. Planned and not yet
+there: `sh packaging/check.sh`, `cargo bench -p heft-scan`.
 
 CI runs `fmt --check`, `clippy` and `test` with `RUSTFLAGS: -D warnings` on
 **every runner `release.yml` builds on**. Adding a target to the release matrix
@@ -137,8 +152,18 @@ did not ("Folder walk: the MFT needs administrator rights").
   Sparse files, compressed files and cloud placeholders (OneDrive "online
   only") are where they differ, and the row says so.
 - **A hard-linked file is counted once**, keyed by (device, inode) or NTFS file
-  id, at the first path the walk reaches; its other paths show it as "also
-  linked from". A test builds a hard link and checks the total.
+  id, at the first path the walk reaches; its other paths are flagged
+  `HARDLINK_DUP` and add nothing ("hard link, counted elsewhere"). A test
+  builds a hard link and checks the total. **Known gap: the Windows folder
+  walk cannot see link counts** (a `FindFirstFileExW` listing carries none,
+  and asking per file would cost the speed the walk exists for), so on
+  Windows a hard-linked file is counted at every path. `C:\Windows\WinSxS` is
+  the large case. The MFT walker fixes it; until then this is written in the
+  README.
+- **The Windows on-disk size is the logical size rounded up to the cluster**,
+  which over-counts files small enough to live inside their MFT record
+  (under about 700 bytes). Compressed and sparse files ask
+  `GetCompressedFileSizeW`; cloud placeholders count as nothing on disk.
 - **Symlinks, junctions and reparse points are not followed.** They are listed
   with their own (tiny) size.
 - **One filesystem at a time by default.** A scan of `/` does not descend into
@@ -152,13 +177,16 @@ did not ("Folder walk: the MFT needs administrator rights").
 
 ### The tree model
 
-One arena per scan, struct-of-arrays, `u32` indices: parent, first child,
-next sibling, size on disk, logical size, file count, flags, and an offset into
+One arena per scan (`heft-scan/src/tree.rs`), struct-of-arrays, `u32`
+indices: parent, first child, child count (a folder's children are contiguous,
+appended in one batch), size on disk, logical size, file count, flags, and an offset into
 **one** interned name buffer. Names are bytes (`OsStr`), so non-UTF-8 names on
 Linux survive and are shown lossy but deleted exactly. Full paths are rebuilt
-on demand by walking parents. Target: **under 40 bytes per entry** before
-names, so ten million files fit in well under a gigabyte; `bench` reports peak
-memory so the budget is checked, not hoped.
+on demand by walking parents. It is 43 bytes per entry before names;
+`bench` reports the arena's real size per entry (88 bytes including names and
+`Vec` growth slack on the first measurement, `docs/perf.md`), so the budget is
+checked, not hoped. Shrinking the vectors to fit when a scan finishes is the
+obvious next saving.
 
 Sizes are aggregated bottom-up as each directory completes, so a folder's size
 is final the moment its subtree is, and partial totals during a scan are
@@ -193,17 +221,21 @@ one selects it in all, and the breadcrumb at the top is the shared location.
    aligned.
 2. **Treemap.** Squarified layout, cushion shading in the WinDirStat manner,
    coloured by file type, click to select, double-click to zoom into a folder,
-   breadcrumb or Backspace to zoom out. Layout runs off the UI thread for the
-   current zoom root and is cached as a vertex buffer; rectangles under a pixel
-   are merged into their parent rather than drawn, so frame time depends on
-   screen pixels, not on file count.
+   breadcrumb or Backspace to zoom out. Layout is cached as one `Arc<Mesh>` per
+   zoom root and size and rebuilt only when those or the tree change (at most
+   four times a second while scanning); anything under 3 px a side is not
+   subdivided but drawn as its folder, so the cost depends on screen pixels,
+   not on file count. It currently runs on the UI thread; move it to a worker
+   if a measured layout ever exceeds a few milliseconds.
 3. **Sunburst.** Rings by depth, for seeing how deep the weight sits; same
    colours, same zoom.
 4. **File types.** Size and count per extension (and per kind: video, images,
    archives, disk images, build output, caches), each one selectable to light
    it up in the treemap.
-5. **Largest files.** The top N files anywhere under the selection, kept in a
-   bounded heap during the walk so it costs nothing extra.
+5. **Largest files.** The top 500 files anywhere under the location, from a
+   bounded heap in one pass over the subtree (`report.rs`). Types, Largest and
+   Age are computed on a worker thread on demand, not during the walk: a pass
+   is tens of milliseconds even on a big tree, and it keeps the walker simple.
 6. **Age.** Space by last modification, bucketed (this week, this month, this
    year, older), for finding the forgotten.
 7. **Duplicates** (opt-in, it reads file contents). Group by size, then by a
