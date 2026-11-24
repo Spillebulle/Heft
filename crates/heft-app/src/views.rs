@@ -58,10 +58,9 @@ pub fn tree_view(ui: &mut egui::Ui, p: Palette, app: &mut App) {
     let Some(scan) = app.scan.clone() else {
         return no_scan(ui, p);
     };
-    let Some(t) = scan.try_tree() else {
-        ui.ctx().request_repaint();
-        return;
-    };
+    // Wait for the walker's write (microseconds) rather than skip the
+    // frame: a skipped frame paints an empty panel, a visible flash.
+    let t = scan.tree();
     if app.rows_stale {
         app.rows = tree_rows(app, &t);
         app.rows_stale = false;
@@ -410,10 +409,9 @@ pub fn treemap_view(ui: &mut egui::Ui, p: Palette, app: &mut App) {
     let Some(scan) = app.scan.clone() else {
         return no_scan(ui, p);
     };
-    let Some(t) = scan.try_tree() else {
-        ui.ctx().request_repaint();
-        return;
-    };
+    // Wait for the walker's write (microseconds) rather than skip the
+    // frame: a skipped frame paints an empty panel, a visible flash.
+    let t = scan.tree();
     let area = ui.available_rect_before_wrap().shrink(metrics::S2);
     let (_, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click());
     let root = app.location;
@@ -561,7 +559,7 @@ pub fn largest_view(ui: &mut egui::Ui, p: Palette, app: &mut App) {
         return waiting(ui, p, app);
     };
     let Some(scan) = app.scan.clone() else { return };
-    let Some(t) = scan.try_tree() else { return };
+    let t = scan.tree();
     let largest = r.largest.clone();
     let mut select = None;
     let mut action = None;
