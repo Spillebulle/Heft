@@ -68,7 +68,13 @@ pub fn read_dir(path: &Path, _root: &RootInfo, want_mtime: bool) -> io::Result<L
                     bytes,
                     Raw {
                         kind,
-                        logical: st.stx_size,
+                        // A folder's own st_size (4096 on ext4, more on a
+                        // big folder) is its index, not content: it counts
+                        // on disk, where it really takes blocks, and not in
+                        // the logical size, which is what files hold. Windows
+                        // reports folders as 0, so this is also what keeps
+                        // the two platforms' logical totals the same.
+                        logical: if kind == Kind::Dir { 0 } else { st.stx_size },
                         disk: st.stx_blocks * 512,
                         mtime: if want_mtime {
                             clamp_secs(st.stx_mtime.tv_sec)
