@@ -165,7 +165,10 @@ check_rpm() {
 
     rm "$repo"
     touch "$repo.disabled"
-    rpm -i --nodeps "$package"
+    # --nosignature: rpm 6 (Fedora 45) refuses an unsigned local package
+    # outright, where dnf only warns. The release packages are not signed;
+    # the archive signs its repository metadata, which is what dnf checks.
+    rpm -i --nodeps --nosignature "$package"
     [ ! -e "$repo" ] || fail "$repo.disabled was not honoured"
     ok "the .disabled marker is honoured"
 }
