@@ -35,11 +35,12 @@ pub enum Icon {
     Package,
     Info,
     Brush,
+    BrushCompact,
     Github,
 }
 
 impl Icon {
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 23] = [
         Self::Drive,
         Self::Folder,
         Self::File,
@@ -61,6 +62,7 @@ impl Icon {
         Self::Package,
         Self::Info,
         Self::Brush,
+        Self::BrushCompact,
         Self::Github,
     ];
 
@@ -243,6 +245,15 @@ impl Icon {
                 ),
                 Node::Path("M19 14H5l-1.973 6.767A1 1 0 0 0 4 22h16a1 1 0 0 0 .973-1.233z"),
                 Node::Path("m8 22 1-4"),
+            ],
+            // lucide brush-cleaning without its two bristle strokes: the mark
+            // at 15 to 23 px, where the bristles merge into a smudge. A subset
+            // of the paths above, not a redrawing.
+            Self::BrushCompact => &[
+                Node::Path(
+                    "M19 14a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2h-3a1 1 0 0 1-1-1V4a2 2 0 0 0-4 0v5a1 1 0 0 1-1 1H6a2 2 0 0 0-2 2v1a1 1 0 0 0 1 1",
+                ),
+                Node::Path("M19 14H5l-1.973 6.767A1 1 0 0 0 4 22h16a1 1 0 0 0 .973-1.233z"),
             ],
             // Simple Icons `github`, copied verbatim the way the Lucide paths
             // above are. It is one closed subpath and it is filled, not

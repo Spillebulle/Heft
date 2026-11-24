@@ -142,10 +142,22 @@ const STROKE_UNITS: f32 = 2.25;
 /// away to a smudge on a taskbar.
 const MIN_STROKE_PX: f32 = 1.35;
 
+/// Below this many pixels the mark draws the brush without its bristle
+/// strokes (optical sizing, as Muster's mark drops detail when small).
+const COMPACT_BELOW: f32 = 24.0;
+
+fn glyph_icon(side: f32) -> crate::icons::Icon {
+    if side < COMPACT_BELOW {
+        crate::icons::Icon::BrushCompact
+    } else {
+        crate::icons::Icon::Brush
+    }
+}
+
 /// The brush, as segments in the 24-unit box.
-fn segments() -> Vec<(f32, f32, f32, f32)> {
+fn segments(side: f32) -> Vec<(f32, f32, f32, f32)> {
     let mut out = Vec::new();
-    for o in crate::icons::outlines(crate::icons::Icon::Brush) {
+    for o in crate::icons::outlines(glyph_icon(side)) {
         let pts = &o.points;
         for w in pts.windows(2) {
             out.push((w[0].x, w[0].y, w[1].x, w[1].y));
@@ -166,7 +178,7 @@ fn glyph(image: &mut Image, side: u32, ink: Color32) {
     let scale = s * GLYPH / 24.0;
     let origin = (s - 24.0 * scale) / 2.0;
     let half = (STROKE_UNITS * scale).max(MIN_STROKE_PX) / 2.0 / scale;
-    let segs = segments();
+    let segs = segments(s);
     let near = |x: f32, y: f32| {
         segs.iter().any(|&(x0, y0, x1, y1)| {
             let (dx, dy) = (x1 - x0, y1 - y0);
@@ -229,9 +241,9 @@ pub fn paint_mark(painter: &egui::Painter, rect: egui::Rect, palette: Palette) {
     crate::icons::draw_weighted(
         painter,
         glyph,
-        crate::icons::Icon::Brush,
+        glyph_icon(side),
         palette.accent_ink,
-        (STROKE_UNITS * scale).max(1.1),
+        (STROKE_UNITS * scale).max(1.2),
     );
 }
 
