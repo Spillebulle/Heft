@@ -102,6 +102,20 @@ pub fn run(args: &[String]) -> Option<i32> {
             }
         },
         other if other == "--view" || std::path::Path::new(other).exists() => return None,
+        other if looks_like_path(other) => {
+            eprintln!("No such file or folder: {other}");
+            if cfg!(windows)
+                && other.len() > 2
+                && other.as_bytes()[1] == b':'
+                && !other.contains(['\\', '/'])
+            {
+                eprintln!(
+                    "The backslashes may have been eaten by the shell. \
+                     Use forward slashes (C:/Users/me) or quote the path."
+                );
+            }
+            2
+        }
         other => {
             eprintln!("Unknown command {other}.\n\n{USAGE}");
             2
@@ -295,4 +309,13 @@ fn peak_memory() -> Option<u64> {
 #[cfg(not(target_os = "linux"))]
 fn peak_memory() -> Option<u64> {
     None
+}
+
+/// A drive letter, a separator or a leading dot: meant as a path, not a command.
+fn looks_like_path(s: &str) -> bool {
+    let b = s.as_bytes();
+    s.contains(['/', '\\'])
+        || s.starts_with('.')
+        || s.starts_with('~')
+        || (b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':')
 }
