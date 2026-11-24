@@ -44,7 +44,7 @@ pub fn read_dir(path: &Path, _root: &RootInfo, want_mtime: bool) -> io::Result<L
         mask |= StatxFlags::MTIME;
     }
     let mut out = Listing::default();
-    while let Some(entry) = dir.next() {
+    for entry in dir.by_ref() {
         let entry = entry?;
         let name = entry.file_name();
         let bytes = name.to_bytes();
@@ -132,6 +132,8 @@ const VIRTUAL: &[i64] = &[
 
 pub fn is_virtual_fs(path: &Path) -> bool {
     match rustix::fs::statfs(path) {
+        // `f_type` is i64 on some targets and not others; the cast is for those.
+        #[allow(clippy::unnecessary_cast)]
         Ok(s) => VIRTUAL.contains(&(s.f_type as i64)),
         Err(_) => false,
     }
