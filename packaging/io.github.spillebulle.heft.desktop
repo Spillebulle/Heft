@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Heft
+GenericName=Disk space analyser
+Comment=See what is taking the room on a disk or in a folder
+Exec=heft %F
+Icon=io.github.spillebulle.heft
+Terminal=false
+Categories=System;Filesystem;
+Keywords=disk;space;usage;storage;treemap;folder;size;clean;
+StartupNotify=true
+StartupWMClass=heft

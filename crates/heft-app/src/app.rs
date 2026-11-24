@@ -4,6 +4,7 @@
 use crate::icons::Icon;
 use crate::theme::{self, Mode, Palette, metrics, text};
 use crate::treemap::Layout;
+use crate::update::{Exit, Updates};
 use crate::views::{self, Action, Reports, Row};
 use crate::widgets::{self, Kind};
 use egui::{Align, Layout as ELayout, RichText, Sense, Vec2, pos2, vec2};
@@ -79,6 +80,11 @@ pub struct App {
     message: Option<(String, Instant)>,
     removing: Option<Arc<Mutex<Option<remove::Outcome>>>>,
     settings_open: bool,
+    /// The update check, the first-run notice and the update dialog. Its
+    /// settings (whether to check, whether the notice was answered, when the
+    /// last check went out, the last reply for a conditional request) are kept
+    /// in eframe storage beside the others.
+    pub updates: Updates,
     /// Focus regained: rescan the folder handed to Brokey (contract: rescan
     /// on exit and on focus). Unused until the handoff is wired.
     pub was_focused: bool,
@@ -112,8 +118,15 @@ impl App {
             message: None,
             removing: None,
             settings_open: false,
+            updates: Updates::default(),
             was_focused: true,
         };
+        // The check runs on a thread and reports through a channel, which is
+        // not an event: without a waker the answer would sit there until the
+        // mouse moved. eframe's context is the waker.
+        let ctx = cc.egui_ctx.clone();
+        app.updates
+            .set_waker(Arc::new(move || ctx.request_repaint()));
         if let Some(s) = cc.storage {
             if let Some(u) = s.get_string("units").and_then(|k| Units::from_key(&k)) {
                 app.units = u;
@@ -124,6 +137,7 @@ impl App {
                 Some("light") => ThemePref::Light,
                 _ => ThemePref::System,
             };
+            load_updates(s, &mut app.updates);
             if let Some(f) = s.get_string("folders") {
                 app.folders = f
                     .lines()
@@ -348,7 +362,39 @@ impl App {
                 .collect::<Vec<_>>()
                 .join("\n"),
         );
+        save_updates(storage, &self.updates);
     }
+}
+
+/// The update settings, from eframe storage. Absent keys leave the defaults:
+/// check on, notice not yet answered, never checked, nothing cached.
+fn load_updates(s: &dyn eframe::Storage, u: &mut Updates) {
+    if let Some(v) = s.get_string("update_check") {
+        u.check_on_startup = v == "true";
+    }
+    u.notice_seen = s.get_string("update_notice_seen").as_deref() == Some("true");
+    u.last_check = s
+        .get_string("update_last_check")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    if let (Some(etag), Some(body)) = (s.get_string("update_etag"), s.get_string("update_cache"))
+        && !etag.is_empty()
+    {
+        u.cached = Some(crate::update::Cached { etag, body });
+    }
+}
+
+fn save_updates(s: &mut dyn eframe::Storage, u: &Updates) {
+    s.set_string("update_check", u.check_on_startup.to_string());
+    s.set_string("update_notice_seen", u.notice_seen.to_string());
+    s.set_string("update_last_check", u.last_check.to_string());
+    let (etag, body) = u
+        .cached
+        .as_ref()
+        .map(|c| (c.etag.clone(), c.body.clone()))
+        .unwrap_or_default();
+    s.set_string("update_etag", etag);
+    s.set_string("update_cache", body);
 }
 
 impl eframe::App for App {
@@ -414,6 +460,22 @@ impl eframe::App for App {
             }
         }
 
+        // The startup check, once, and only once the notice has been answered.
+        self.updates.start_if_due();
+        self.updates.poll(Instant::now());
+        // An update that has landed asks the window to close, and the two ways
+        // it ends differ: a swapped binary can be started again from here,
+        // where the Windows installer needs Heft gone and starts it itself.
+        if let Some(exit) = self.updates.take_exit_request() {
+            if exit == Exit::Restart
+                && let Err(why) = crate::update::relaunch()
+            {
+                self.updates.restart_failed(why);
+            } else {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+
         keyboard(ctx, self);
         top_bar(ctx, p, self);
         status_bar(ctx, p, self);
@@ -433,6 +495,9 @@ impl eframe::App for App {
             });
         confirm_dialog(ctx, p, self);
         settings_dialog(ctx, p, self);
+        // Last, so it draws over everything: the first-run notice, or the
+        // update dialog when there is one.
+        crate::updatedlg::show(ctx, p, mode, &mut self.updates);
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
@@ -441,7 +506,11 @@ impl eframe::App for App {
 }
 
 fn keyboard(ctx: &egui::Context, app: &mut App) {
-    if ctx.wants_keyboard_input() || app.confirm.is_some() {
+    if ctx.wants_keyboard_input()
+        || app.confirm.is_some()
+        || !app.updates.notice_seen
+        || app.updates.flow().is_some()
+    {
         return;
     }
     let (up, del, shift, esc) = ctx.input(|i| {
@@ -1029,6 +1098,8 @@ fn settings_dialog(ctx: &egui::Context, p: Palette, app: &mut App) {
                 });
             });
             ui.add_space(metrics::S4);
+            updates_section(ui, p, &mut app.updates);
+            ui.add_space(metrics::S4);
             ui.label(
                 RichText::new(format!(
                     "Heft {} · GPL-3.0-or-later · icons by Lucide (ISC)",
@@ -1037,13 +1108,90 @@ fn settings_dialog(ctx: &egui::Context, p: Palette, app: &mut App) {
                 .size(text::SMALL)
                 .color(p.text_dim),
             );
-            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            // The update dialog may be open over this one; Escape is its.
+            if app.updates.flow().is_none() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 close = true;
             }
         });
     if close {
         app.settings_open = false;
     }
+}
+
+/// Settings, Updates: the one switch for the automatic check, the check a
+/// person asks for (never held back by the throttle), what it found, and how
+/// this copy was installed and so how it is kept current.
+fn updates_section(ui: &mut egui::Ui, p: Palette, updates: &mut Updates) {
+    use crate::update::{InstallKind, Status};
+    widgets::eyebrow(ui, p, "Updates");
+    ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            ui.label(
+                RichText::new("Check for new versions when Heft starts")
+                    .size(text::BODY)
+                    .color(p.text_strong),
+            );
+            ui.label(
+                RichText::new(
+                    "The only request Heft makes on its own behalf, at most once every six hours.",
+                )
+                .size(text::SMALL)
+                .color(p.text_dim),
+            );
+        });
+        ui.with_layout(ELayout::right_to_left(Align::Center), |ui| {
+            let mut on = updates.check_on_startup;
+            if widgets::toggle(ui, p, &mut on) {
+                updates.check_on_startup = on;
+                // Answering here counts as having been asked, so the notice
+                // does not appear afterwards to ask the same question again.
+                updates.notice_seen = true;
+            }
+        });
+    });
+    ui.add_space(metrics::S2);
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(crate::updatedlg::status_line(updates.status()))
+                .size(text::BODY)
+                .color(p.text),
+        );
+        ui.with_layout(ELayout::right_to_left(Align::Center), |ui| {
+            let busy = matches!(updates.status(), Status::Checking);
+            if widgets::button(ui, p, "Check now", Kind::Secondary, !busy).clicked() && !busy {
+                updates.check();
+            }
+            // A result the user asked for opens from here rather than being
+            // thrown up as a modal.
+            if matches!(updates.status(), Status::Available(_))
+                && widgets::button(ui, p, "What is in it", Kind::Secondary, true).clicked()
+            {
+                updates.open_offer();
+            }
+        });
+    });
+    ui.add_space(metrics::S1);
+    let how = match updates.kind() {
+        InstallKind::Portable => {
+            "This copy is a portable download. Heft can replace it itself.".to_string()
+        }
+        InstallKind::AppImage(_) => {
+            "This copy is an AppImage. Heft can replace it itself.".to_string()
+        }
+        InstallKind::Msi => {
+            "Installed with the Windows installer. An update runs through Windows Installer and asks for permission once."
+                .to_string()
+        }
+        InstallKind::Managed(m) => format!(
+            "Installed as a package managed by {}. Heft will not replace it; when there is a new version it says how to get it.",
+            m.label()
+        ),
+        InstallKind::Unknown => {
+            "Heft cannot tell how this copy was installed, so it will not replace it. New versions are on the releases page."
+                .to_string()
+        }
+    };
+    ui.label(RichText::new(how).size(text::SMALL).color(p.text_dim));
 }
 
 /// Opens the platform's file manager on `path`, selecting it where it can.

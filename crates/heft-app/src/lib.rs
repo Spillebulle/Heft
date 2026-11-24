@@ -13,6 +13,8 @@ pub mod icons;
 pub mod lucide;
 pub mod theme;
 pub mod treemap;
+pub mod update;
+pub mod updatedlg;
 pub mod views;
 pub mod widgets;
 

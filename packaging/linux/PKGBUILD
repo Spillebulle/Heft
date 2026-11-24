@@ -1,0 +1,78 @@
+# Maintainer: Spillebulle <spillebulle@gmail.com>
+#
+# Arch package, built from the release binary rather than from source.
+#
+# `-bin` because that is what Arch calls a package of somebody else's compiled
+# artefact, and calling it `heft` would claim a from-source build that this is
+# not. A source PKGBUILD would be a better citizen and is a reasonable thing to
+# add later; it needs the release tarball to be a source tarball, which the
+# workflow does not currently produce.
+#
+# The workflow fills in pkgver and the checksum before running makepkg, so the
+# placeholders below are what a local rehearsal edits. See
+# `.github/workflows/release.yml`.
+
+pkgname=heft-bin
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Disk space analyser: see what is taking the room"
+arch=('x86_64' 'aarch64')
+url="https://github.com/Spillebulle/heft"
+license=('GPL-3.0-or-later')
+provides=('heft')
+conflicts=('heft')
+options=('!strip' '!debug')
+
+# The scriptlet that adds the house archive after install and after every
+# upgrade, so that `pacman -Syu` keeps Heft current from then on. The `.deb`
+# and the `.rpm` do the same in their own scriptlets; see `heft.install` and
+# `../Packages/ENROLMENT.md`. No capabilities: Heft needs none.
+install=heft.install
+
+# Opened at runtime by winit and wgpu rather than recorded in the ELF, so
+# namcap's automatic scan will not find them. Every one of them is the window:
+# the scan itself needs nothing but libc, and `heft scan` runs on a machine
+# with no display server. The portal is optional: only the folder picker
+# needs it. See the longer note in `build-packages.sh`.
+depends=('libx11' 'libxcursor' 'libxrandr' 'libxi' 'libxkbcommon'
+         'wayland' 'vulkan-icd-loader' 'gcc-libs')
+optdepends=('xdg-desktop-portal: the "Scan a folder" picker')
+
+# Filled in by the workflow: the archive built for this architecture.
+source_x86_64=("heft-${pkgver}-x86_64-unknown-linux-gnu.tar.gz")
+source_aarch64=("heft-${pkgver}-aarch64-unknown-linux-gnu.tar.gz")
+sha256sums_x86_64=('SKIP')
+sha256sums_aarch64=('SKIP')
+
+package() {
+    local stage="${srcdir}/heft-${pkgver}-${CARCH}-unknown-linux-gnu"
+    # The tarball's directory is named after the Rust target triple, which is
+    # not $CARCH for aarch64 on every host; find it rather than spell it.
+    [ -d "$stage" ] || stage=$(find "$srcdir" -maxdepth 1 -type d -name 'heft-*' | head -1)
+
+    install -Dm755 "${stage}/heft" "${pkgdir}/usr/bin/heft"
+    install -Dm644 "${stage}/packaging/io.github.spillebulle.heft.desktop" \
+        "${pkgdir}/usr/share/applications/io.github.spillebulle.heft.desktop"
+    install -Dm644 "${stage}/packaging/io.github.spillebulle.heft.metainfo.xml" \
+        "${pkgdir}/usr/share/metainfo/io.github.spillebulle.heft.metainfo.xml"
+    # No MIME types and no thumbnailer: Heft opens no documents. No desktop
+    # database refresh in the scriptlet either, unlike the .deb and the .rpm:
+    # pacman ships alpm hooks that rebuild `mimeinfo.cache` whenever a package
+    # touches share/applications, so declaring the desktop entry is the whole
+    # of the work.
+    for size in 16 32 48 64 128 256; do
+        install -Dm644 "${stage}/icons/heft-${size}.png" \
+            "${pkgdir}/usr/share/icons/hicolor/${size}x${size}/apps/io.github.spillebulle.heft.png"
+    done
+    # The archive's key under Heft's own name, which `heft.install` hands
+    # to `pacman-key`. Never a shared path: two packages may not own one file.
+    # The release tarball carries `packaging/` whole, which is where it is.
+    install -Dm644 "${stage}/packaging/linux/spillebulle-archive.asc" \
+        "${pkgdir}/usr/share/heft/spillebulle-archive.asc"
+    install -Dm644 "${stage}/LICENSE" \
+        "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+    install -Dm644 "${stage}/README.md" \
+        "${pkgdir}/usr/share/doc/heft/README.md"
+    install -Dm644 "${stage}/CHANGELOG.md" \
+        "${pkgdir}/usr/share/doc/heft/CHANGELOG.md"
+}

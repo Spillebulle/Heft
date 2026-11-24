@@ -30,6 +30,32 @@ wgpu = "25"
 # The native folder picker (portal on Linux), as Umber and Windup use.
 rfd = "0.17.2"
 
+# The update check (`update/`): asks GitHub what the newest release is and,
+# where the installation is not a package manager's, fetches one of its assets
+# and swaps the binary. Muster's choices, for Muster's reasons: `ureq` with
+# rustls and compiled-in roots (no OpenSSL to satisfy on the aarch64 builds or
+# in an AppImage), serde for the release JSON, and `zip`/`tar`/`flate2` to lift
+# the one binary out of a release archive.
+ureq = { version = "3.3", default-features = false, features = ["rustls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
+tar = "0.4"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+
+# The installer's half of the update: `OpenProcess`/`WaitForSingleObject` wait
+# for Heft to close, and `ShellExecuteExW` with `runas` raises the one consent
+# prompt an MSI install shows. `Win32_System_Registry` is where windows-sys
+# 0.61 gates `SHELLEXECUTEINFOW`. See `update/installwin.rs`.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_System_Registry",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
 # Headless rendering of the real window for screenshot checks
 # (`cargo test -p heft-app --test shots -- --ignored`), which works with no
 # display and a locked screen.

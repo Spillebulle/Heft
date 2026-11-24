@@ -1,0 +1,329 @@
+name: Release
+
+# Cutting a release is pushing a tag; everything below follows from that, so
+# there is no button to press and no step that can be done in the wrong order.
+# `tools/release.ps1` (or `tools/release.sh`) is what pushes it, after checking
+# the tree and running the same gates CI runs.
+#
+# `workflow_dispatch` builds and packages everything but publishes nothing,
+# which is how a change to this file gets rehearsed without spending a tag.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+permissions:
+  contents: write
+
+jobs:
+  # --- the binaries ---------------------------------------------------------
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04,     target: x86_64-unknown-linux-gnu,  arch: amd64 }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, arch: arm64 }
+          - { os: windows-latest,   target: x86_64-pc-windows-msvc,    arch: x64   }
+          - { os: windows-11-arm,   target: aarch64-pc-windows-msvc,   arch: arm64 }
+          # No macOS. `CLAUDE.md` settles that it is not a target, and the
+          # rule that comes with this matrix is that `ci.yml` covers every
+          # runner in it — so a row added here is a row added there in the same
+          # commit, or the gate has a hole exactly the shape of the new target.
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # Ubuntu 22.04 rather than latest, deliberately: a binary built against an
+      # older glibc runs on newer distributions, and one built against a newer
+      # glibc does not run on older ones. The oldest supported runner is
+      # therefore the widest compatible build.
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-dev libxkbcommon-dev \
+            libxkbcommon-x11-dev libx11-dev libxrandr-dev libxi-dev \
+            libgtk-3-dev mesa-vulkan-drivers
+
+      # The same gates CI runs on every push. Repeated because a tag can point
+      # at a commit CI never saw, and a release built from an untested tree is
+      # exactly what a release process exists to prevent.
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Build
+        shell: bash
+        run: |
+          set -eu
+          cargo build --release -p heft-desktop
+
+      - name: Stage
+        shell: bash
+        run: |
+          set -eu
+          version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          stage="heft-${version}-${{ matrix.target }}"
+          mkdir -p "staging/$stage"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp target/release/heft.exe "staging/$stage/"
+          else
+            cp target/release/heft "staging/$stage/"
+          fi
+          cp README.md CHANGELOG.md LICENSE "staging/$stage/"
+          # Carried so the Arch package can install the same desktop entry,
+          # metadata and icons the .deb and .rpm do, without a second checkout.
+          cp -r packaging "staging/$stage/"
+          cp -r assets/icons "staging/$stage/icons"
+          mkdir -p dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            (cd staging && 7z a "../dist/${stage}.zip" "$stage" > /dev/null)
+          else
+            tar czf "dist/${stage}.tar.gz" -C staging "$stage"
+          fi
+
+      # --- Windows installer (WiX 5, per-architecture MSI) ------------------
+      - name: Build MSI
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -eu
+          dotnet tool install --global wix --version 5.0.2
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          wix extension add -g WixToolset.UI.wixext/5.0.2
+          # Util supplies WixShellExec, which is what the exit dialog's
+          # "Start Heft" checkbox runs. Pinned to the same version as the
+          # toolset: a custom action from a mismatched extension is a binary
+          # that may not be there under the name the .wxs asks for.
+          wix extension add -g WixToolset.Util.wixext/5.0.2
+
+          # WiX's licence page wants RTF. The conversion is a script rather
+          # than a few lines here because the escaping behaved differently in
+          # YAML and in a developer's shell, which is the worst way for a build
+          # step to be wrong; it is now the same code in both places and can be
+          # run locally.
+          mkdir -p wixassets
+          cp assets/icons/heft.ico wixassets/heft.ico
+          # The installer's own artwork. Generated from `theme::Palette` by
+          # `heft-app`'s `examples/make-art.rs` and committed, like the icons,
+          # rather than drawn here.
+          cp packaging/windows/banner.bmp packaging/windows/dialog.bmp wixassets/
+          sh packaging/windows/make-licence-rtf.sh LICENSE wixassets/licence.rtf
+
+          # `-pdbtype none`: WiX otherwise drops a .wixpdb beside the installer,
+          # and the artefact upload takes everything in dist/ — so the release
+          # would carry debug symbols nobody asked for.
+          wix build packaging/windows/heft.wxs \
+            -arch ${{ matrix.arch }} \
+            -ext WixToolset.UI.wixext \
+            -ext WixToolset.Util.wixext \
+            -pdbtype none \
+            -d Version="$VERSION" \
+            -d BinDir="target/release" \
+            -d DocDir="." \
+            -d AssetDir="wixassets" \
+            -o "dist/heft-${VERSION}-${{ matrix.arch }}.msi"
+
+      # --- Windows setup executable -----------------------------------------
+      #
+      # `heft.exe` with the MSI concatenated onto it and a footer saying how
+      # long the package is, so a first install shows Heft's own window rather
+      # than Windows Installer's. `update::payload` has the format;
+      # `make-setup` is the one writer of it and checks its work twice, which
+      # is one more time than it used to and for a reason worth keeping.
+      #
+      # It reads the package back out of the bytes before writing them, and it
+      # then asks the **written file** `payload::carried_by` — the predicate the
+      # running binary uses to decide, on a double-click, that it is an
+      # installer rather than Heft. Those are different questions. 0.0.8
+      # shipped a setup executable whose format was perfect and which opened the
+      # application instead of installing, because dispatch went by a
+      # command-line flag nothing passes; only the second check would have
+      # caught it.
+      #
+      # After the MSI, obviously: it is the payload.
+      - name: Build setup executable
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cargo run --release -p heft-app --example make-setup --             "target/release/heft.exe"             "dist/heft-${VERSION}-${{ matrix.arch }}.msi"             "dist/heft-setup-${VERSION}-${{ matrix.arch }}.exe"
+
+      # --- Linux packages ---------------------------------------------------
+      - name: Build Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y rpm file desktop-file-utils
+          chmod +x packaging/linux/build-packages.sh
+          packaging/linux/build-packages.sh \
+            "$VERSION" target/release/heft "${{ matrix.arch }}" dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  # --- Arch package ---------------------------------------------------------
+  #
+  # A job of its own because makepkg needs an Arch userland, which no runner
+  # image provides; a container is the cheapest way to get one.
+  arch:
+    name: build Arch package
+    needs: build
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: x86_64-unknown-linux-gnu
+          path: dist
+
+      - name: Build
+        run: |
+          set -eu
+          pacman -Sy --noconfirm --needed git
+          version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+
+          # makepkg refuses to run as root, and a container is root by default.
+          useradd -m builder
+          work=/home/builder/build
+          install -d -o builder "$work"
+          cp packaging/linux/PKGBUILD "$work/"
+          # The PKGBUILD's `install=` scriptlet, which enrols the machine in
+          # the house archive. makepkg fails outright when the file it names is
+          # missing, so these two are copied together or the Arch build stops
+          # here.
+          cp packaging/linux/heft.install "$work/"
+          cp "dist/heft-${version}-x86_64-unknown-linux-gnu.tar.gz" "$work/"
+          sed -i "s/^pkgver=.*/pkgver=${version}/" "$work/PKGBUILD"
+          chown -R builder "$work"
+
+          su builder -c "cd $work && makepkg --noconfirm --nodeps"
+          mkdir -p out
+          cp "$work"/*.pkg.tar.zst out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: out/*
+          if-no-files-found: error
+
+  # --- enrolment ------------------------------------------------------------
+  #
+  # Each Linux package installed in a clean container of the distribution it is
+  # for, and the machine checked for what `../Packages/ENROLMENT.md` says it
+  # leaves behind: the keyring, the source, the section, the key trusted. A
+  # package that installs and enrols nothing looks identical on the release
+  # page to one that works, and the difference is every machine that installed
+  # it never being offered another Heft. `check-enrolment.sh` has the detail,
+  # including the second enrolling package the `.deb` half installs.
+  #
+  # Before `publish`, so a package that does not enrol is never released. On a
+  # manual run this is the rehearsal of it.
+  enrol:
+    name: enrol ${{ matrix.format }}
+    needs: [build, arch]
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { format: deb,  image: 'debian:stable',    artifact: x86_64-unknown-linux-gnu, file: 'heft_*_amd64.deb' }
+          - { format: rpm,  image: 'fedora:latest',    artifact: x86_64-unknown-linux-gnu, file: 'heft-*-1.x86_64.rpm' }
+          - { format: arch, image: 'archlinux:latest', artifact: arch-package,             file: 'heft-bin-*-1-x86_64.pkg.tar.zst' }
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist
+
+      - name: Install and check
+        run: bash packaging/linux/check-enrolment.sh ${{ matrix.format }} dist/${{ matrix.file }}
+
+  # --- publish ---------------------------------------------------------------
+  publish:
+    name: publish
+    needs: [build, arch, enrol]
+    runs-on: ubuntu-latest
+    # A manual run builds and packages but must not publish: there is no tag to
+    # attach a release to, and inventing one would be a release nobody asked
+    # for. This is what makes `workflow_dispatch` safe to use as a rehearsal.
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # The notes come out of CHANGELOG.md rather than being written here, so
+      # what GitHub shows and what the repository says cannot drift apart
+      # (STYLE-GUIDE.md section 17.2: the body is that section verbatim).
+      # `crates/heft-desktop/tests/release.rs` fails CI if the section for this
+      # version is missing, empty, or not the newest.
+      - name: Release notes
+        run: |
+          set -eu
+          version="${GITHUB_REF_NAME#v}"
+          manifest=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          if [ "$version" != "$manifest" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match Cargo.toml's ${manifest}" >&2
+            exit 1
+          fi
+          sh tools/release-notes.sh "$version" > notes.md
+          echo '--- notes to be published ---'
+          cat notes.md
+
+      # The title is the bare version, built from the tag and never typed:
+      # `1.0.0`, not `v1.0.0` or `Heft 1.0.0` (STYLE-GUIDE.md section 17.2).
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la artifacts
+          gh release create "$GITHUB_REF_NAME" \
+            --title "${GITHUB_REF_NAME#v}" \
+            --notes-file notes.md \
+            artifacts/*
+
+      # The apt, rpm and pacman archive rebuilds itself from the newest release of
+      # every project it carries, so this asks for a rebuild and tells it
+      # nothing it could not look up. It runs after the release exists,
+      # because the archive's first act is to download that release's assets.
+      #
+      # The token is a fine-grained one with write access to
+      # `Spillebulle/packages` and to nothing else. Skipped when it is absent
+      # rather than failing: a fork, or this repository before the archive was
+      # set up, should still be able to cut a release, and the archive's own
+      # weekly run picks up anything a skipped dispatch missed.
+      - name: Tell the archive
+        env:
+          ARCHIVE_DISPATCH_TOKEN: ${{ secrets.ARCHIVE_DISPATCH_TOKEN }}
+        if: env.ARCHIVE_DISPATCH_TOKEN != ''
+        run: |
+          set -eu
+          GH_TOKEN="$ARCHIVE_DISPATCH_TOKEN" gh api \
+            /repos/Spillebulle/packages/dispatches \
+            -f event_type=package \
+            -f "client_payload[repository]=$GITHUB_REPOSITORY" \
+            -f "client_payload[tag]=$GITHUB_REF_NAME"

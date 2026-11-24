@@ -1,0 +1,85 @@
+//! Build `heft-setup.exe` from a binary and a package.
+//!
+//! ```sh
+//! cargo run -p heft-app --example make-setup -- \
+//!     target/release/heft.exe heft-0.0.8-x64.msi heft-setup-0.0.8-x64.exe
+//! ```
+//!
+//! The setup executable is Heft's own binary with the MSI concatenated onto it
+//! and a footer saying how long the MSI is — `heft_app::update::payload` has
+//! the format and the reasoning. Run with `--install` it lifts the package back
+//! out and installs it through Heft's own window.
+//!
+//! **A Rust example rather than a shell script**, unlike the rest of
+//! `packaging/`, and for one reason: it calls the same `payload::append` the
+//! running binary reads with, so the writer and the reader cannot drift. Two
+//! scripts — one for `pwsh` and one for `sh`, which is what `tools/` keeps —
+//! would be two more statements of a byte layout.
+//!
+//! The *name* matters and is the caller's: `unpack_payload` reads the version
+//! out of the file's own stem, so `heft-setup-0.0.8-x64.exe` is what puts
+//! "Install Heft 0.0.8" at the top of the window.
+
+use heft_app::update::payload;
+
+fn main() -> std::process::ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let [executable, package, out] = args.as_slice() else {
+        eprintln!("usage: make-setup <executable> <package.msi> <out.exe>");
+        return std::process::ExitCode::FAILURE;
+    };
+
+    let exe = match std::fs::read(executable) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            eprintln!("could not read {executable}: {e}");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
+    let msi = match std::fs::read(package) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            eprintln!("could not read {package}: {e}");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
+
+    let setup = payload::append(&exe, &msi);
+    // Read back before it is written, so a build that produced something the
+    // installer cannot open fails here rather than on somebody's machine. It
+    // costs one comparison of a ten-megabyte slice.
+    match payload::read(&setup) {
+        Some(back) if back == msi.as_slice() => {}
+        _ => {
+            eprintln!("the package did not read back out of the setup binary");
+            return std::process::ExitCode::FAILURE;
+        }
+    }
+
+    if let Err(e) = std::fs::write(out, &setup) {
+        eprintln!("could not write {out}: {e}");
+        return std::process::ExitCode::FAILURE;
+    }
+
+    // And then ask the **written file** the question the running binary asks of
+    // itself, which is a different question from the one above and is the one
+    // that was never checked. `read` proves the format round-trips in memory;
+    // `carried_by` is what decides, on a double-click, that this executable is
+    // an installer rather than Heft. A setup binary that fails it is one that
+    // opens the application instead of installing it, which is exactly what
+    // 0.0.8's shipped and nothing here caught: the format had always been fine.
+    if !payload::carried_by(std::path::Path::new(out)) {
+        eprintln!(
+            "{out} was written but is not recognised as an installer; it would \
+             open Heft instead of installing it"
+        );
+        return std::process::ExitCode::FAILURE;
+    }
+    println!(
+        "{out}: {} bytes ({} of program, {} of package)",
+        setup.len(),
+        exe.len(),
+        msi.len()
+    );
+    std::process::ExitCode::SUCCESS
+}

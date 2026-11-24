@@ -22,6 +22,9 @@ fn shoot(view: &str, dark: bool) {
             });
             heft_app::app::App::new(cc, start)
         });
+    // No first-run update notice over the pictures, and no request.
+    harness.state_mut().updates.notice_seen = true;
+    harness.state_mut().updates.check_on_startup = false;
     harness.state_mut().theme = if dark {
         heft_app::app::ThemePref::Dark
     } else {

@@ -10,14 +10,15 @@ with a window, Windows and Linux, installable and self-updating like the rest
 of the family. The name is the weight of a thing in the hand, which is the one
 question the app answers about every folder: how heavy is this?
 
-**Early, not released.** Built: the scan engine (Linux and Windows folder
+**1.0.0, being released.** Built: the scan engine (Linux and Windows folder
 walkers, the arena, hard-link and mount accounting, reports), the text mode,
 the window with the Folders, Treemap, File types, Largest files and Age views,
-the disk list, and delete to Trash / permanently. **Not built:** packaging,
-the updater, the release workflow, the NTFS MFT walker and its elevated
-helper, owner lookup and the Brokey handoff, Sunburst, Duplicates,
-Suggestions. `README.md`'s "What is not there yet" is the user-facing list and
-is kept honest. Where this file describes something not yet built, it is the
+the disk list, delete to Trash / permanently, and the release machinery
+ported from Muster (setup `.exe` and MSI, `.deb`, `.rpm`, Arch package,
+AppImage, tarball and zip, archive enrolment, the updater, `release.yml`).
+**Not built:** the NTFS MFT walker and its elevated helper, owner lookup and
+the Brokey handoff, Sunburst, Duplicates, Suggestions. `README.md`'s "What
+is not there yet" is the user-facing list and is kept honest. Where this file describes something not yet built, it is the
 decided shape. Treat "Decisions" and "Invariants" as settled (they were reasoned about before
 the first line, and re-litigating them costs more than following them) and
 "Open" as genuinely open. When code and this file disagree, either the code is
@@ -43,7 +44,7 @@ defect, and inheriting those is the point of the family.
 | Interface | egui + wgpu through winit, exactly Umber's and Muster's stack. Not Tauri: the treemap is hundreds of thousands of rectangles redrawn on every hover and zoom, and the tree is millions of nodes; both stay in one process's memory and go straight to the GPU, with no serialising across a webview bridge |
 | Shape | **One binary.** The window is the product; `heft <subcommand>` text mode comes out of the same executable (scanning, benchmarking, JSON output) |
 | Targets | Windows x86-64 + ARM64, Linux x86-64 + ARM64 (Arch/CachyOS, Debian/Ubuntu, Fedora). **macOS is not a target for now** (decided with the user, 2026-11-23). The walker sits behind one module per platform, so if that changes, `getattrlistbulk` is the fast path and it plugs in there |
-| Packages | `.msi` and a setup `.exe`, `.deb`, `.rpm`, Arch `heft-bin` package, AppImage, tarball, all from `packaging/` ported from Muster |
+| Packages | `.msi` and a setup `.exe`, `.deb`, `.rpm`, Arch `heft-bin` package, AppImage, tarball and zip, all from `packaging/` ported from Muster. **No Flatpak**: a sandboxed disk analyser cannot see the disk it is meant to measure, so Muster's Flatpak job and manifest were not ported |
 | Updates | Muster's `update` module, ported: releases API, conditional request, swaps the binary, never writes to a package manager's copy |
 | Distribution | The house archive, `../Packages` (§18 of the style guide). `.deb`/`.rpm`/Arch packages enrol the machine exactly as `../Packages/ENROLMENT.md` says |
 | Repo / id | `github.com/Spillebulle/heft`, application id `io.github.spillebulle.heft` |
@@ -72,7 +73,10 @@ cargo test --workspace                       # everything
 cargo test -p heft-scan                      # engine only: real temp trees, fast
 cargo clippy --workspace --all-targets
 cargo fmt --all
-cargo check -p heft-scan --target x86_64-unknown-linux-gnu   # the Linux walker, from Windows
+cargo check --workspace --all-targets --target x86_64-unknown-linux-gnu   # the Linux build, from Windows
+sh packaging/check.sh                        # app id, archive paths and scriptlets agree (Git Bash works)
+sh tools/release-notes.sh 1.0.0              # the notes the release will publish
+powershell tools/release.ps1 1.0.1 [-DryRun] # cut a release (or sh tools/release.sh 1.0.1 [--dry-run])
 
 # Headless screenshots of the real window (works with no display or a locked
 # screen), written to target/shots/: every view dark, two light.
@@ -81,8 +85,12 @@ HEFT_SHOT_ROOT=<folder> cargo test --release -p heft-app --test shots -- --ignor
 
 The Linux-only walker tests (hard link counted once, unreadable folder
 reported, symlink not followed) cannot run on the Windows development machine,
-which has no WSL; CI's Ubuntu runners are where they run. Planned and not yet
-there: `sh packaging/check.sh`, `cargo bench -p heft-scan`.
+which has no WSL; CI's Ubuntu runners are where they run, and so do the Linux
+packages (`build-packages.sh` needs `dpkg-deb`, `rpmbuild`, `gpg` and
+linuxdeploy; the Arch package and the enrolment checks need containers). The
+MSI and the setup `.exe` can be built locally with WiX 5.0.2 (a global dotnet
+tool, with the UI and Util extensions) by the commands in `release.yml`'s
+"Build MSI" and "Build setup executable" steps. Planned and not yet there: `cargo bench -p heft-scan`.
 
 CI runs `fmt --check`, `clippy` and `test` with `RUSTFLAGS: -D warnings` on
 **every runner `release.yml` builds on**. Adding a target to the release matrix
@@ -348,41 +356,97 @@ Decided for this application specifically:
 - **A number on screen is a fact.** A folder still being scanned says so next
   to its size; a total that excludes unreadable folders says how many.
 
-## Packaging, the installer, the updater
+## Packaging and releases
 
-Port from Muster rather than designing again; its `packaging/`, `tools/`,
-`ci.yml` and `release.yml` are the templates, and `packaging/check.sh` keeps
-the application id and the archive paths consistent across the AppStream
-file, the desktop entry, the icons, the scriptlets and the updater.
+Ported from Muster, which is the reference: when a rule here has a longer
+story, it is in `../Muster/CLAUDE.md` "Packaging, the installer, the
+updater" and "Conduct", and those rules apply to Heft verbatim.
 
+**What a release publishes** (`release.yml`, the README's table,
+`crates/heft-desktop/tests/release.rs` and `update::release::wanted_asset`
+state these names; rename all or none):
+
+| File | Built by |
+|---|---|
+| `heft-setup-<v>-{x64,arm64}.exe` | `make-setup` example: `heft.exe` with the MSI appended |
+| `heft-<v>-{x64,arm64}.msi` | WiX 5, `packaging/windows/heft.wxs` |
+| `heft-<v>-{x86_64,aarch64}-pc-windows-msvc.zip` | the Stage step |
+| `heft_<v>_{amd64,arm64}.deb`, `heft-<v>-1.{x86_64,aarch64}.rpm` | `packaging/linux/build-packages.sh` |
+| `Heft-<v>-{x86_64,aarch64}.AppImage` | the same script, through linuxdeploy |
+| `heft-bin-<v>-1-x86_64.pkg.tar.zst` | `packaging/linux/PKGBUILD` in an Arch container (x86-64 only) |
+| `heft-<v>-{x86_64,aarch64}-unknown-linux-gnu.tar.gz` | the Stage step |
+
+- **Cutting a release is pushing a tag** `vX.Y.Z`, with `tools/release.ps1`
+  or `tools/release.sh`, which check the tree, run the gates, push `main`,
+  wait for CI to be green on that exact commit, and only then tag (the
+  annotation is the notes). The version lives only in `[workspace.package]`.
+  `CHANGELOG.md`'s `## X.Y.Z` section is the release body, verbatim, 3 to 8
+  user-facing bullets (§17.2); the release title is the bare version, built
+  by the workflow from the tag. `tests/release.rs` fails if the section is
+  missing, empty, not newest, or the README's download links name another
+  version or a file the release does not publish.
+- **CI covers every runner `release.yml` builds on** (`ubuntu-22.04`,
+  `ubuntu-22.04-arm`, `windows-latest`, `windows-11-arm`; ARM64 Windows is
+  built natively, not cross-compiled), and its `packaging` job parses the
+  `.wxs`, the AppStream file and both workflows, `bash -n`s every script,
+  validates the desktop entry and runs `packaging/check.sh` on every push.
 - **The Linux packages enrol the machine in the house archive**, with the
-  paths and scripts of `../Packages/ENROLMENT.md` copied, not re-derived, and
-  `packaging/linux/spillebulle-archive.asc` copied byte for byte from Muster.
-  No path is shared with another package; sources are written by scriptlets,
-  created never overwritten, never removed, `.disabled` honoured.
-- **At the first release**, add `Spillebulle/Heft` to `../Packages/projects`,
-  give this repository `ARCHIVE_DISPATCH_TOKEN`, and copy the "Tell the
-  archive" step into `release.yml`. A release is not finished until the
-  archive's publish run is green.
-- **The updater never prints a command that cannot work.** The remedy is chosen
-  by `update::install::detect`, a pure function of an injected probe; with the
-  archive it prints the upgrade command, without it it names the exact release
-  asset, and where no asset exists for this machine it names none. A test fails
-  if a forbidden sentence reaches a machine without the archive.
-- **The update check has a budget**: off until the user is asked, throttled and
-  persisted, and conditional (`ETag` / `If-None-Match`, so a 304 costs nothing
-  against GitHub's sixty-an-hour limit). Muster learned this one with 403s.
-- **Cutting a release is pushing a tag**, after CI is green on that exact
-  commit. The version lives only in `[workspace.package]`; `CHANGELOG.md` is the
-  release notes, published verbatim, and a test fails if the current version's
-  section is missing or not newest.
-- **An asset name is stated in several places** (release workflow, README
-  download table, the updater's `wanted_asset`, the test that checks them).
-  Rename all or none.
-- **Nothing says "verified" unless releases are signed.** They are not.
-- Windows: the swap is rename-then-replace; the setup `.exe` carries the MSI
-  appended after the PE and runs from a temporary copy. winget manifest at the
-  first stable release (§18.4).
+  paths and scripts of `../Packages/ENROLMENT.md` copied, and
+  `packaging/linux/spillebulle-archive.asc` byte for byte Muster's. No path is
+  shared with another package; sources are written by scriptlets, created
+  never overwritten, never removed, `.disabled` honoured. `release.yml`'s
+  `enrol` job installs each package in a clean container and checks it with
+  `packaging/linux/check-enrolment.sh` before anything is published (before
+  Heft is in the archive the `.deb` check accepts that apt sees the archive
+  without heft in it).
+- **No capabilities.** Muster's scriptlets grant `CAP_NET_*`; Heft's grant
+  nothing, and `check.sh` fails if a `setcap` comes back.
+- **A release is not finished when the tag is.** The last step dispatches to
+  `Spillebulle/packages` (skipped without `ARCHIVE_DISPATCH_TOKEN`), and the
+  archive's publish run has to be green before Linux machines are offered the
+  new version. Still to do by hand at the first release: add
+  `Spillebulle/Heft` to `../Packages/projects` and give this repository the
+  token. A winget manifest follows the first stable release (§18.4).
+- **The MSI's identity is Heft's alone.** The UpgradeCode and the two
+  component GUIDs were generated for Heft at the port; `update::installer`'s
+  tests pin the UpgradeCode, refuse a GUID used twice, and refuse any GUID
+  the family's other MSIs carry.
+- **The release binary declares the `windows` subsystem** (no console behind
+  the window) and attaches to the parent's console for the text mode
+  (`heft-desktop/src/main.rs`). `build.rs` embeds `assets/icons/heft.ico`
+  with `winresource`, host-gated.
+- **The setup `.exe` is `heft.exe` with the MSI appended** after the PE and a
+  footer (`update::payload`). `main.rs` reads the footer before anything else:
+  a double-clicked setup has no arguments, so the payload, not a flag, is what
+  makes it the installer. It installs from a copy in the temporary directory.
+
+### The updater (`heft-app/src/update/`, `updatedlg.rs`)
+
+Muster's module, ported. `install::detect` is a pure function of a probe and
+decides whether this copy is Heft's to replace (portable zip or tarball,
+AppImage, and the MSI through `msiexec`) or a package manager's (never
+written; the dialog prints that manager's upgrade command when the archive is
+configured, names the exact release asset when it is not, and names none where
+no asset exists for this machine; a test fails if a forbidden command reaches
+a machine without the archive). On Windows the swap is rename-then-replace.
+
+- **The check has a budget.** No request until the first-run notice is
+  answered; one automatic check per six hours at most, persisted; and
+  **conditional**: the last reply's `ETag` goes back as `If-None-Match`, and a
+  304 (which GitHub does not count) is answered from the newest release cached
+  beside it. A check the user asks for is never held back. A 403 with no quota
+  left is named as GitHub's rate limit and says when it clears.
+- **Persisted in eframe storage** with Heft's other settings (keys
+  `update_check`, `update_notice_seen`, `update_last_check`, `update_etag`,
+  `update_cache`), not in a prefs file of its own as Muster does: Heft keeps
+  every setting there and the updater needs nothing earlier than the window.
+  The cost is eframe's autosave interval: an answer is written within 30 s or
+  at exit.
+- **Settings, Updates** is the one place the switch lives, beside "Check now",
+  the result, and how this copy was installed. The update dialog and the
+  first-run notice are `updatedlg.rs`; their state machine is `update::flow`.
+- Nothing says "verified": releases are not signed, and a test fails on the
+  word in a stage label.
 
 ## Repository presentation
 
@@ -396,7 +460,10 @@ real scan, with nothing personal in the paths.
 
 - **Nothing leaves the machine.** No telemetry, no uploading of file lists,
   no remote lookups of paths or hashes. The update check is the only request
-  Heft makes on its own behalf.
+  Heft makes on its own behalf; it is off until the user has been asked, and
+  GitHub answers the sixty-first unauthenticated request in an hour from one
+  address with 403, which the updater names as a rate limit (Muster's 0.0.5
+  spent the budget in an afternoon).
 - **Heft only reads until told otherwise.** Scanning never modifies a file,
   not even an access time where the platform lets us avoid it (`O_NOATIME`
   where permitted). Every write is a deletion the user asked for.

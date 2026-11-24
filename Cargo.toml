@@ -4,12 +4,11 @@ members = ["crates/heft-scan", "crates/heft-app", "crates/heft-desktop"]
 default-members = ["crates/heft-desktop"]
 
 [workspace.package]
-version = "0.0.1"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.90"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/Spillebulle/heft"
-authors = ["Heft contributors"]
 
 [workspace.dependencies]
 heft-scan = { path = "crates/heft-scan" }

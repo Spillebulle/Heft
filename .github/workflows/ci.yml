@@ -11,6 +11,56 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
+  # The packaging files are only exercised when a release is built, which is
+  # the worst moment to discover a typo in one: the tag is already pushed. They
+  # cost seconds to parse, so they are parsed on every push instead (Muster's
+  # first MSI build broke on an XML comment with two hyphens in a row).
+  packaging:
+    name: packaging files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Parse
+        run: |
+          python3 - <<'PY'
+          import sys, xml.dom.minidom, yaml
+          bad = False
+          for f in ['packaging/windows/heft.wxs',
+                    'packaging/io.github.spillebulle.heft.metainfo.xml']:
+              try:
+                  xml.dom.minidom.parse(f)
+              except Exception as e:
+                  bad = True
+                  print(f'{f}: {e}')
+          for f in ['.github/workflows/ci.yml',
+                    '.github/workflows/release.yml']:
+              try:
+                  yaml.safe_load(open(f, encoding='utf-8'))
+              except Exception as e:
+                  bad = True
+                  print(f'{f}: {e}')
+          sys.exit(1 if bad else 0)
+          PY
+
+      - name: Shell syntax
+        run: |
+          for f in packaging/linux/*.sh packaging/linux/heft.install                    packaging/windows/*.sh packaging/check.sh tools/*.sh; do
+            bash -n "$f"
+          done
+
+      - name: Desktop entry
+        run: |
+          sudo apt-get update && sudo apt-get install -y desktop-file-utils
+          desktop-file-validate packaging/io.github.spillebulle.heft.desktop
+
+      # The application id has to be the same name in the AppStream file, the
+      # desktop entry, the icons, the window and the packaging scripts, and the
+      # archive paths the same in the scriptlets and the updater. See the
+      # header of the script.
+      - name: Metadata consistency
+        run: sh packaging/check.sh
+
   # Every runner the release will build on (CLAUDE.md: adding a target to the
   # release matrix means adding its runner here in the same commit). No macOS:
   # it is not a target. ubuntu-22.04 rather than latest, for the older glibc.

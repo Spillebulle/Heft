@@ -34,6 +34,36 @@ fn skin(p: Palette, kind: Kind, hovered: bool) -> (Option<Color32>, Option<Color
     }
 }
 
+/// A toggle, §7.8: 34 x 18, knob left when off and right when on (Muster's).
+pub fn toggle(ui: &mut egui::Ui, p: Palette, on: &mut bool) -> bool {
+    let (rect, response) = ui.allocate_exact_size(vec2(34.0, 18.0), Sense::click());
+    let changed = response.clicked();
+    if changed {
+        *on = !*on;
+    }
+    ui.painter()
+        .rect_filled(rect, 9.0, if *on { p.accent } else { p.control });
+    if !*on {
+        ui.painter().rect_stroke(
+            rect,
+            9.0,
+            Stroke::new(metrics::HAIRLINE, p.line),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let x = if *on {
+        rect.right() - 9.0
+    } else {
+        rect.left() + 9.0
+    };
+    ui.painter().circle_filled(
+        pos2(x, rect.center().y),
+        6.0,
+        if *on { p.accent_ink } else { p.knob },
+    );
+    changed
+}
+
 /// A §7.6 button: 26 px, radius 5, 11.5 px text. Disabled is 45 % across the
 /// whole control, and the caller adds a tooltip saying why.
 pub fn button(
