@@ -34,4 +34,7 @@ rfd = "0.17.2"
 # (`cargo test -p heft-app --test shots -- --ignored`), which works with no
 # display and a locked screen.
 [dev-dependencies]
+png = "0.18"
+skrifa = "0.32"
+ab_glyph_rasterizer = "0.1"
 egui_kittest = { version = "0.32", features = ["wgpu", "snapshot", "eframe"] }

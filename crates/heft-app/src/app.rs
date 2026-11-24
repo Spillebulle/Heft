@@ -477,6 +477,41 @@ fn go_up(app: &mut App) {
     }
 }
 
+/// The version and licence at the foot of the sidebar with GitHub's mark
+/// beside them, as the family's other apps have it (Tally's status bar,
+/// Windup's rail). The mark opens the repository in the browser; nothing is
+/// fetched.
+fn version_line(ui: &mut egui::Ui, p: Palette) {
+    const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
+    ui.horizontal(|ui| {
+        ui.add_space(metrics::S2);
+        ui.label(
+            RichText::new(format!("v{} · GPL-3.0", env!("CARGO_PKG_VERSION")))
+                .size(text::TINY)
+                .color(p.text_dim),
+        );
+        ui.add_space(metrics::S1);
+        let side = 14.0;
+        let (rect, r) = ui.allocate_exact_size(Vec2::splat(side + 4.0), Sense::click());
+        let r = r
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(format!(
+                "Source on GitHub
+{REPOSITORY}"
+            ));
+        let ink = if r.hovered() { p.text } else { p.text_dim };
+        crate::icons::draw(
+            ui.painter(),
+            egui::Rect::from_center_size(rect.center(), Vec2::splat(side)),
+            Icon::Github,
+            ink,
+        );
+        if r.clicked() {
+            ui.ctx().open_url(egui::OpenUrl::new_tab(REPOSITORY));
+        }
+    });
+}
+
 fn top_bar(ctx: &egui::Context, p: Palette, _app: &mut App) {
     egui::TopBottomPanel::top("top")
         .exact_height(metrics::MENU_BAR)
@@ -490,8 +525,7 @@ fn top_bar(ctx: &egui::Context, p: Palette, _app: &mut App) {
             widgets::hairline_bottom(ui, p);
             ui.horizontal_centered(|ui| {
                 let (rect, _) = ui.allocate_exact_size(Vec2::splat(metrics::MARK), Sense::hover());
-                ui.painter()
-                    .rect_filled(rect, metrics::RADIUS_TIGHT, p.accent);
+                crate::art::paint_mark(ui.painter(), rect, p);
                 ui.add_space(metrics::S2);
                 ui.label(
                     RichText::new("Heft")
@@ -516,6 +550,8 @@ fn sidebar(ctx: &egui::Context, p: Palette, app: &mut App) {
             widgets::hairline_right(ui, p);
             ui.with_layout(ELayout::bottom_up(Align::Min), |ui| {
                 ui.add_space(metrics::S2);
+                version_line(ui, p);
+                ui.add_space(metrics::S1);
                 if widgets::nav_row(ui, p, Icon::Gear, "Settings", None, false).clicked() {
                     app.settings_open = true;
                 }

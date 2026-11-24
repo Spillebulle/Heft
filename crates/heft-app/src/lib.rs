@@ -7,6 +7,7 @@
 //! applications are rooms in the same house.
 
 pub mod app;
+pub mod art;
 pub mod details;
 pub mod icons;
 pub mod lucide;
@@ -35,6 +36,9 @@ pub fn run(start: Start) -> Result<(), String> {
             .with_inner_size(WINDOW)
             .with_min_inner_size([820.0, 480.0])
             .with_title("Heft")
+            // The mark, rasterised from the palette so the taskbar cannot show
+            // a stale accent.
+            .with_icon(art::window_icon())
             .with_app_id(APP_ID),
         ..Default::default()
     };

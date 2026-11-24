@@ -7,7 +7,7 @@
 //! style guide was written after. Adding one is a paste, never a drawing.
 
 use crate::lucide::{self, Node, Outline};
-use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, Vec2, pos2};
+use egui::{Color32, Mesh, Painter, Pos2, Rect, Shape, Stroke, Vec2, pos2};
 use std::sync::LazyLock;
 
 const BOX: f32 = 24.0;
@@ -34,10 +34,12 @@ pub enum Icon {
     Up,
     Package,
     Info,
+    Brush,
+    Github,
 }
 
 impl Icon {
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 22] = [
         Self::Drive,
         Self::Folder,
         Self::File,
@@ -58,7 +60,15 @@ impl Icon {
         Self::Up,
         Self::Package,
         Self::Info,
+        Self::Brush,
+        Self::Github,
     ];
+
+    /// Is this mark filled rather than stroked? GitHub's is: a logo is drawn
+    /// as itself (Muster's rule), and everything else is a Lucide outline.
+    fn is_filled(self) -> bool {
+        matches!(self, Self::Github)
+    }
 
     fn nodes(self) -> &'static [Node] {
         match self {
@@ -225,16 +235,54 @@ impl Icon {
                 Node::Path("M12 16v-4"),
                 Node::Path("M12 8h.01"),
             ],
+            // lucide brush-cleaning
+            Self::Brush => &[
+                Node::Path("m16 22-1-4"),
+                Node::Path(
+                    "M19 14a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2h-3a1 1 0 0 1-1-1V4a2 2 0 0 0-4 0v5a1 1 0 0 1-1 1H6a2 2 0 0 0-2 2v1a1 1 0 0 0 1 1",
+                ),
+                Node::Path("M19 14H5l-1.973 6.767A1 1 0 0 0 4 22h16a1 1 0 0 0 .973-1.233z"),
+                Node::Path("m8 22 1-4"),
+            ],
+            // Simple Icons `github`, copied verbatim the way the Lucide paths
+            // above are. It is one closed subpath and it is filled, not
+            // stroked; see [`Icon::is_filled`].
+            Self::Github => &[Node::Path(
+                "M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12",
+            )],
         }
     }
 }
 
-static GEOMETRY: LazyLock<Vec<Vec<Outline>>> = LazyLock::new(|| {
+/// Outlines per icon, in the 24-unit box, and for the filled mark the
+/// triangles that cover them (egui fans a closed path from its first point,
+/// which paints a notched shape's gaps shut). Worked out once.
+struct Drawn {
+    outlines: Vec<Outline>,
+    fill: Vec<Vec<[u32; 3]>>,
+}
+
+static GEOMETRY: LazyLock<Vec<Drawn>> = LazyLock::new(|| {
     Icon::ALL
         .iter()
-        .map(|i| lucide::flatten(i.nodes()))
+        .map(|i| {
+            let outlines = lucide::flatten(i.nodes());
+            let fill = if i.is_filled() {
+                outlines.iter().map(|o| triangulate(&o.points)).collect()
+            } else {
+                Vec::new()
+            };
+            Drawn { outlines, fill }
+        })
         .collect()
 });
+
+/// The icon's flattened outlines in the 24-unit box (the mark rasterises
+/// these into the app icon).
+pub fn outlines(icon: Icon) -> &'static [Outline] {
+    let at = Icon::ALL.iter().position(|i| *i == icon).expect("in ALL");
+    &GEOMETRY[at].outlines
+}
 
 /// Draw `icon` centred in `rect`, in `colour`. The stroke scales with the box.
 pub fn draw(painter: &Painter, rect: Rect, icon: Icon, colour: Color32) {
@@ -244,14 +292,47 @@ pub fn draw(painter: &Painter, rect: Rect, icon: Icon, colour: Color32) {
     }
     let scale = size / BOX;
     let origin = rect.center() - Vec2::splat(size * 0.5);
-    let width = (2.0 * scale).max(1.0);
+    draw_with(painter, origin, scale, (2.0 * scale).max(1.0), icon, colour);
+}
+
+/// `draw` with the stroke width chosen by the caller: the mark's glyph is
+/// drawn heavier than the chrome's icons so it holds at 16 px.
+pub fn draw_weighted(painter: &Painter, rect: Rect, icon: Icon, colour: Color32, width: f32) {
+    let size = rect.width().min(rect.height());
+    if size <= 1.0 {
+        return;
+    }
+    let scale = size / BOX;
+    let origin = rect.center() - Vec2::splat(size * 0.5);
+    draw_with(painter, origin, scale, width, icon, colour);
+}
+
+fn draw_with(painter: &Painter, origin: Pos2, scale: f32, width: f32, icon: Icon, colour: Color32) {
     let stroke = Stroke::new(width, colour);
     let at = Icon::ALL
         .iter()
         .position(|i| *i == icon)
         .expect("every icon is in ALL");
+    let drawn = &GEOMETRY[at];
     let place = |p: &Pos2| pos2(origin.x + p.x * scale, origin.y + p.y * scale);
-    for outline in &GEOMETRY[at] {
+    if !drawn.fill.is_empty() {
+        for (outline, triangles) in drawn.outlines.iter().zip(&drawn.fill) {
+            let points: Vec<_> = outline.points.iter().map(place).collect();
+            let mut mesh = Mesh::default();
+            for point in &points {
+                mesh.colored_vertex(*point, colour);
+            }
+            for [a, b, c] in triangles {
+                mesh.add_triangle(*a, *b, *c);
+            }
+            painter.add(Shape::mesh(mesh));
+            // A mesh has hard edges; a hairline along the outline is what
+            // antialiases the silhouette.
+            painter.add(Shape::closed_line(points, Stroke::new(1.0_f32, colour)));
+        }
+        return;
+    }
+    for outline in &drawn.outlines {
         let points: Vec<_> = outline.points.iter().map(place).collect();
         if outline.is_dot() {
             painter.circle_filled(points[0], width / 2.0, colour);
@@ -261,6 +342,105 @@ pub fn draw(painter: &Painter, rect: Rect, icon: Icon, colour: Color32) {
             painter.add(Shape::line(points, stroke));
         }
     }
+}
+
+/// Twice the area a run of points encloses, signed by which way it winds.
+///
+/// The sign is the whole point: it says which turn is a corner and which is a
+/// notch, and in a y-down box that is the opposite of what a mathematician
+/// would write down. Nothing here cares which way round it is, only that one
+/// answer is used throughout.
+fn winding(points: &[Pos2]) -> f32 {
+    let mut sum = 0.0;
+    for (index, a) in points.iter().enumerate() {
+        let b = points[(index + 1) % points.len()];
+        sum += a.x * b.y - b.x * a.y;
+    }
+    sum
+}
+
+/// Which side of the line `a`→`b` the point `c` falls.
+fn turn(a: Pos2, b: Pos2, c: Pos2) -> f32 {
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+}
+
+/// Is `p` inside the triangle `a`, `b`, `c`, which winds positively?
+fn inside(a: Pos2, b: Pos2, c: Pos2, p: Pos2) -> bool {
+    turn(a, b, p) > 0.0 && turn(b, c, p) > 0.0 && turn(c, a, p) > 0.0
+}
+
+/// Cover a closed outline with triangles, by ear clipping.
+///
+/// **egui cannot fill this shape and does not say so.** Its tessellator covers
+/// a closed path with a fan from the first point, which is right for the convex
+/// shapes the widgets are made of and quietly wrong for anything with a notch
+/// in it — the GitHub mark filled that way is a solid blob with its own arms
+/// painted across the gaps. So the one filled mark is handed to the painter as
+/// a mesh, and this is what works the mesh out: take the corner that no other
+/// point of the outline sits inside, cut it off, and go round again.
+///
+/// Quadratic in the number of points and run once for the life of the process,
+/// on one icon of some hundreds of points. The answer is indices into `points`,
+/// so it holds for every size that icon is ever drawn at.
+fn triangulate(points: &[Pos2]) -> Vec<[u32; 3]> {
+    /// Below this an ear is a sliver rather than a triangle. The box is 24
+    /// units across, so this is a millionth of it.
+    const SLIVER: f32 = 1e-5;
+
+    if points.len() < 3 {
+        return Vec::new();
+    }
+    let mut left: Vec<u32> = (0..points.len() as u32).collect();
+    // Ears are cut from a positively wound outline, so an outline that winds
+    // the other way is walked backwards instead of being copied.
+    if winding(points) < 0.0 {
+        left.reverse();
+    }
+
+    let mut out = Vec::with_capacity(points.len() - 2);
+    let at = |index: u32| points[index as usize];
+    while left.len() > 3 {
+        let before = left.len();
+        let mut i = 0;
+        while i < left.len() && left.len() > 3 {
+            let n = left.len();
+            let (a, b, c) = (left[(i + n - 1) % n], left[i], left[(i + 1) % n]);
+            let corner = turn(at(a), at(b), at(c));
+            // A corner flat enough to have no area is cut without asking what
+            // is inside it: removing a point that lies on the line between its
+            // neighbours cannot change the shape, and leaving it is how a walk
+            // finds no ear at all and stalls.
+            let ear = if corner.abs() < SLIVER {
+                true
+            } else {
+                corner > 0.0
+                    && !left.iter().any(|&other| {
+                        other != a
+                            && other != b
+                            && other != c
+                            && inside(at(a), at(b), at(c), at(other))
+                    })
+            };
+            if ear {
+                if corner.abs() >= SLIVER {
+                    out.push([a, b, c]);
+                }
+                left.remove(i);
+            } else {
+                i += 1;
+            }
+        }
+        // A whole pass without an ear means the outline crosses itself, which
+        // no icon here does. Fanning what is left keeps the mark on screen
+        // rather than dropping it, and the test below is what would catch it.
+        if left.len() == before {
+            break;
+        }
+    }
+    for k in 1..left.len().saturating_sub(1) {
+        out.push([left[0], left[k], left[k + 1]]);
+    }
+    out
 }
 
 #[cfg(test)]
