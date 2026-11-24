@@ -1,11 +1,26 @@
-# Heft
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/banner-paper.png">
+    <img src="docs/images/banner.png" alt="Heft" width="560">
+  </picture>
+</p>
 
-**Find out what is taking up your disk, fast.**
+<p align="center">
+  <b>Find out what is taking up your disk, fast.</b> Heft scans a disk or a
+  folder and shows where the space went, then lets you get rid of what you do
+  not need, to the Recycle Bin or Trash by default.
+</p>
 
-Heft scans a disk or a folder and shows where the space went: the biggest
-folders first, a treemap of everything, the largest files, the space per file
-type and per age. Then it lets you get rid of what you do not need, to the
-Recycle Bin or Trash by default. One native application for Windows and Linux.
+<p align="center">
+  Windows and Linux · one native window, no runtime · a parallel walker that
+  sizes a folder without opening its files · hard links counted once ·
+  unreadable folders counted, not dropped · nothing leaves the machine
+</p>
+
+![The Heft window on a 186 GB home folder: the treemap, coloured by file type,
+with a 24 GB virtual disk selected and the details panel beside it giving its
+size, its share of its folder and of the home folder, its type and the actions
+for it](docs/images/window.png)
 
 ## Install
 
@@ -107,6 +122,39 @@ packages are updated by your package manager.
   heft scan C:\ --json
   heft bench /usr
   ```
+
+## The views
+
+Every view reads the same scan and shares one selection and one location,
+so a folder chosen in one is the folder the others are about.
+
+<img src="docs/images/folders.png" alt="The Folders view: the home folder's
+top folders sorted by size, each with a share bar, its size on disk, its
+percentage, its file count and its newest modification, with Projects opened
+to show five project folders" width="100%">
+
+**Folders** is the main screen: the biggest folders first, opened as deep as
+you like, each with its share of its parent, its file count and its newest
+change. **Treemap** (above) draws everything at once, coloured by file type;
+double-click a folder to go into it, and the panel on the right says what the
+selection is and what can be done with it.
+
+<img src="docs/images/types.png" alt="The File types view: space by kind
+(video, disk images, data, build output and more) and by extension, each with
+a bar, a size, a percentage and a file count" width="100%">
+
+**File types** totals the space by kind and by extension. **Largest files**
+lists the biggest five hundred files anywhere under the location, and **Age**
+buckets the space by when it was last changed, which is where the forgotten
+things are.
+
+<img src="docs/images/largest.png" alt="The Largest files view: virtual disks,
+videos, installer images and game data, each with its size, type colour and
+folder" width="49%"> <img src="docs/images/age.png" alt="The Age view: space
+modified this week, this month, in the last three months, this year, in the
+last three years and before" width="49%">
+
+The pictures are of a made-up home folder, not anyone's real one.
 
 ## What is not there yet
 

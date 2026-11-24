@@ -79,7 +79,10 @@ sh tools/release-notes.sh 1.0.0              # the notes the release will publis
 powershell tools/release.ps1 1.0.1 [-DryRun] # cut a release (or sh tools/release.sh 1.0.1 [--dry-run])
 
 # Headless screenshots of the real window (works with no display or a locked
-# screen), written to target/shots/: every view dark, two light.
+# screen), written to target/shots/: every view dark, two light. The disk list is
+# made up (HEFT_SHOT_REAL_DISKS=1 for the real one). The README's pictures are
+# of the made-up home folder `python tools/demo-home.py E:\Home` writes;
+# docs/images/ holds copies of the dark ones.
 HEFT_SHOT_ROOT=<folder> cargo test --release -p heft-app --test shots -- --ignored --nocapture
 ```
 

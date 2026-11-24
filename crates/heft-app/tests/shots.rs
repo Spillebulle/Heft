@@ -1,6 +1,8 @@
 //! Renders the real window headlessly and writes PNGs to `target/shots/`.
 //! Not a pass/fail test: run it, then look at the pictures.
 //!   HEFT_SHOT_ROOT=<folder> cargo test -p heft-app --test shots -- --ignored --nocapture
+//! The disk list is made up unless HEFT_SHOT_REAL_DISKS is set, so the
+//! pictures can go in the README.
 
 use egui_kittest::Harness;
 use std::time::{Duration, Instant};
@@ -25,6 +27,10 @@ fn shoot(view: &str, dark: bool) {
     // No first-run update notice over the pictures, and no request.
     harness.state_mut().updates.notice_seen = true;
     harness.state_mut().updates.check_on_startup = false;
+    // The README's pictures name no real machine's disks.
+    if std::env::var_os("HEFT_SHOT_REAL_DISKS").is_none() {
+        harness.state_mut().volumes = demo_disks();
+    }
     harness.state_mut().theme = if dark {
         heft_app::app::ThemePref::Dark
     } else {
@@ -42,6 +48,21 @@ fn shoot(view: &str, dark: bool) {
             break;
         }
         std::thread::sleep(Duration::from_millis(50));
+    }
+    if view == "folders" {
+        // Open the root and its "Projects" folder, if it has one, so the
+        // picture shows a few levels of the tree.
+        let app = harness.state_mut();
+        let scan = app.scan.clone().unwrap();
+        let t = scan.tree();
+        if let Some(&root) = t.roots().first() {
+            app.expanded.insert(root);
+            if let Some(p) = t.children(root).find(|&c| t.display_name(c) == "Projects") {
+                app.expanded.insert(p);
+                app.selected = Some(p);
+            }
+        }
+        app.rows_stale = true;
     }
     if view == "treemap" {
         // Select the largest file, so the details panel has something to say.
@@ -66,6 +87,21 @@ fn shoot(view: &str, dark: bool) {
     ));
     image.save(&path).unwrap();
     println!("wrote {}", path.display());
+}
+
+fn demo_disks() -> Vec<heft_scan::volumes::Volume> {
+    const GB: u64 = 1_000_000_000;
+    let disk = |path: &str, label: &str, total: u64, free: u64| heft_scan::volumes::Volume {
+        path: path.into(),
+        label: label.into(),
+        total: total * GB,
+        free: free * GB,
+    };
+    vec![
+        disk("C:\\", "Local disk (C:)", 1000, 312),
+        disk("D:\\", "Games (D:)", 2000, 744),
+        disk("E:\\", "Storage (E:)", 2000, 1530),
+    ]
 }
 
 #[test]
