@@ -7,6 +7,7 @@
 //! applications are rooms in the same house.
 
 pub mod app;
+pub mod details;
 pub mod icons;
 pub mod lucide;
 pub mod theme;

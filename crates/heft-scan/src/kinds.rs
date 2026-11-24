@@ -95,7 +95,7 @@ pub fn kind_of_ext(e: &str) -> FileKind {
         "iso" | "img" | "vhd" | "vhdx" | "vmdk" | "qcow2" | "vdi" | "dmg" | "wim" | "esd"
         | "appimage" => DiskImage,
         "pdf" | "doc" | "docx" | "odt" | "rtf" | "txt" | "md" | "xls" | "xlsx" | "ods" | "csv"
-        | "ppt" | "pptx" | "odp" | "epub" | "mobi" | "tex" => Document,
+        | "tsv" | "ppt" | "pptx" | "odp" | "epub" | "mobi" | "tex" => Document,
         "rs" | "c" | "h" | "cpp" | "hpp" | "cc" | "cs" | "java" | "kt" | "py" | "js" | "mjs"
         | "ts_" | "tsx" | "jsx" | "go" | "rb" | "php" | "swift" | "lua" | "sh" | "ps1" | "html"
         | "css" | "scss" | "vue" | "svelte" | "toml" | "yaml" | "yml" | "json" | "xml" | "map" => {

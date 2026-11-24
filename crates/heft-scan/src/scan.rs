@@ -187,6 +187,13 @@ impl Scan {
         fs_path_in(&self.shared, &t, node)
     }
 
+    /// `fs_path` against a tree guard the caller already holds. Taking a
+    /// second read lock while holding one can deadlock behind a waiting
+    /// writer.
+    pub fn fs_path_with(&self, t: &Tree, node: NodeId) -> PathBuf {
+        fs_path_in(&self.shared, t, node)
+    }
+
     /// Reads `node` again from disk, replacing what was there. Returns at
     /// once; the tree updates as the rescan proceeds.
     pub fn rescan(&self, node: NodeId) {

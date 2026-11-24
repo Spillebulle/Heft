@@ -419,6 +419,9 @@ impl eframe::App for App {
         status_bar(ctx, p, self);
         sidebar(ctx, p, self);
         options_strip(ctx, p, self);
+        if self.view == View::Treemap && self.scan.is_some() {
+            crate::details::panel(ctx, p, self);
+        }
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(p.window))
             .show(ctx, |ui| match self.view {
@@ -441,13 +444,17 @@ fn keyboard(ctx: &egui::Context, app: &mut App) {
     if ctx.wants_keyboard_input() || app.confirm.is_some() {
         return;
     }
-    let (up, del, shift) = ctx.input(|i| {
+    let (up, del, shift, esc) = ctx.input(|i| {
         (
             i.key_pressed(egui::Key::Backspace),
             i.key_pressed(egui::Key::Delete),
             i.modifiers.shift,
+            i.key_pressed(egui::Key::Escape),
         )
     });
+    if esc {
+        app.selected = None;
+    }
     if up {
         go_up(app);
     }

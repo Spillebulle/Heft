@@ -311,7 +311,7 @@ pub fn tree_view(ui: &mut egui::Ui, p: Palette, app: &mut App) {
                     toggle = Some(n);
                 }
                 resp.context_menu(|ui| {
-                    if let Some(a) = context_menu(ui, app, n) {
+                    if let Some(a) = context_menu(ui, app, &t, n) {
                         action = Some((n, a));
                     }
                 });
@@ -358,10 +358,12 @@ pub enum Action {
     ZoomIn,
 }
 
-fn context_menu(ui: &mut egui::Ui, app: &App, n: NodeId) -> Option<Action> {
+/// `t` is the guard the calling view already holds: the menu never takes a
+/// second read lock (that can deadlock behind a waiting writer).
+fn context_menu(ui: &mut egui::Ui, app: &App, t: &Tree, n: NodeId) -> Option<Action> {
     let mut out = None;
     let scan = app.scan.as_ref()?;
-    let is_dir = scan.tree().is_dir(n);
+    let is_dir = t.is_dir(n);
     if is_dir && ui.button("Open in treemap").clicked() {
         out = Some(Action::ZoomIn);
         ui.close();
@@ -384,7 +386,7 @@ fn context_menu(ui: &mut egui::Ui, app: &App, n: NodeId) -> Option<Action> {
         }
     }
     ui.separator();
-    let refusal = heft_scan::remove::refusal(scan, n);
+    let refusal = heft_scan::remove::refusal_with(scan, t, n);
     let r = ui.add_enabled(refusal.is_none(), egui::Button::new(App::trash_label()));
     let r = match &refusal {
         Some(why) => r.on_disabled_hover_text(why),
@@ -481,7 +483,7 @@ pub fn treemap_view(ui: &mut egui::Ui, p: Palette, app: &mut App) {
             }
         }
         resp.context_menu(|ui| {
-            if let Some(a) = context_menu(ui, app, h) {
+            if let Some(a) = context_menu(ui, app, &t, h) {
                 action = Some((h, a));
             }
         });
@@ -635,7 +637,7 @@ pub fn largest_view(ui: &mut egui::Ui, p: Palette, app: &mut App) {
                     select = Some(n);
                 }
                 resp.context_menu(|ui| {
-                    if let Some(a) = context_menu(ui, app, n) {
+                    if let Some(a) = context_menu(ui, app, &t, n) {
                         action = Some((n, a));
                     }
                 });

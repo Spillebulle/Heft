@@ -10,7 +10,7 @@
 //! control disabled with that reason as its tooltip.
 
 use crate::scan::Scan;
-use crate::tree::{NodeId, flag};
+use crate::tree::{NodeId, Tree, flag};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,7 +22,11 @@ pub enum How {
 /// Why a node may not be removed, in a sentence for a tooltip. `None` means
 /// it may.
 pub fn refusal(scan: &Scan, node: NodeId) -> Option<String> {
-    let t = scan.tree();
+    refusal_with(scan, &scan.tree(), node)
+}
+
+/// `refusal` against a tree guard the caller already holds.
+pub fn refusal_with(scan: &Scan, t: &Tree, node: NodeId) -> Option<String> {
     if t.parent(node) == crate::NONE {
         return Some("A scan root cannot be removed from here.".into());
     }
@@ -32,9 +36,7 @@ pub fn refusal(scan: &Scan, node: NodeId) -> Option<String> {
     if t.has(node, flag::OTHER_FS) || t.has(node, flag::VIRTUAL) {
         return Some("This is where another filesystem is mounted.".into());
     }
-    drop(t);
-    let path = scan.fs_path(node);
-    protected(&path)
+    protected(&scan.fs_path_with(t, node))
 }
 
 /// The places that are never Heft's to remove.

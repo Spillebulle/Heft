@@ -199,9 +199,14 @@ honest partial totals.
   expand, sort and look at the treemap of what has been found so far, and
   cancel at any time (takes effect within one directory read).
 - The walker never takes a lock per file. Threads build private batches and
-  publish completed directories to the arena; the UI reads a snapshot at a
-  throttled rate (a few times a second while scanning) and never blocks a
-  frame on the walker.
+  publish completed directories to the arena, holding the write lock once
+  per directory (microseconds). Views take a blocking read for the frame:
+  skipping a frame when the lock is busy paints an empty panel, which showed
+  as black flicker. The wait is bounded by one directory's write.
+- **Never take a second read of the tree while holding one.** A nested read
+  behind a waiting writer deadlocks (it did, in the details panel). Code that
+  already holds a guard passes it on: `remove::refusal_with`,
+  `Scan::fs_path_with`, `context_menu(.., &t, ..)`.
 - **Progress is honest.** The number of entries is unknown until the end, so
   the bar is an empty rail plus a sentence with live figures ("1,204,331 files,
   412 GB, 6 s"), never an invented percentage. The one exception is the MFT
@@ -226,7 +231,12 @@ one selects it in all, and the breadcrumb at the top is the shared location.
    four times a second while scanning); anything under 3 px a side is not
    subdivided but drawn as its folder, so the cost depends on screen pixels,
    not on file count. It currently runs on the UI thread; move it to a worker
-   if a measured layout ever exceeds a few milliseconds.
+   if a measured layout ever exceeds a few milliseconds. A details panel on
+   the right (`details.rs`, `metrics::PANEL` wide) describes the selection, or
+   the folder shown when nothing is selected: name, location, both sizes,
+   share of parent and of the folder shown, type or file count, modified,
+   any link, unreadable or mount note, and Open, Show, Copy path and
+   Recycle Bin. Escape clears the selection.
 3. **Sunburst.** Rings by depth, for seeing how deep the weight sits; same
    colours, same zoom.
 4. **File types.** Size and count per extension (and per kind: video, images,
@@ -400,7 +410,8 @@ real scan, with nothing personal in the paths.
 - `heft-scan` has no GUI dependency, and no test of aggregation, accounting or
   deletion bookkeeping needs a real disk.
 - No per-node `PathBuf` or `String` in the tree.
-- No lock taken per file in the walker; no frame blocked on the walker.
+- No lock taken per file in the walker; no frame left empty because the
+  walker held the lock; no nested read of the tree.
 - No invented percentage; no total that silently excludes what could not be
   read; no hard link counted twice.
 - Delete goes to the Trash unless the user chose otherwise for that action.

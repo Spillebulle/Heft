@@ -40,6 +40,15 @@ fn shoot(view: &str, dark: bool) {
         }
         std::thread::sleep(Duration::from_millis(50));
     }
+    if view == "treemap" {
+        // Select the largest file, so the details panel has something to say.
+        let app = harness.state_mut();
+        let scan = app.scan.clone().unwrap();
+        let t = scan.tree();
+        app.selected = heft_scan::report::largest_files(&t, app.location, 1, false)
+            .first()
+            .copied();
+    }
     // A few more frames for the reports thread and the throttle.
     for _ in 0..20 {
         std::thread::sleep(Duration::from_millis(60));
